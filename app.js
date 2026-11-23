@@ -57,7 +57,7 @@
   }
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(db)); return true; }
-    catch (e) { alertBox('Could not save', 'This device is out of storage space. Please make a backup and tell Josh.'); return false; }
+    catch (e) { alertBox('Could not save', 'This device is out of storage space. Please make a backup right away.'); return false; }
   }
   if (navigator.storage && navigator.storage.persist) { try { navigator.storage.persist(); } catch (e) {} }
 
