@@ -3,7 +3,8 @@
 (function () {
   'use strict';
 
-  var KEY = 'camphost_v1';
+  var DEMO = /[?&]demo\b/.test(location.search);
+  var KEY = DEMO ? 'camphost_demo' : 'camphost_v1';
   var SITE_TYPES = [
     { id: 'full',   name: 'Full Hookup',           desc: 'Water, electric & sewer' },
     { id: 'ew',     name: 'Electric + Water Only', desc: 'No sewer' },
@@ -36,6 +37,23 @@
     db.settings.prices = Object.assign({}, DEFAULTS.settings.prices, db.settings.prices || {});
     if (!Array.isArray(db.entries)) db.entries = [];
     if (!db.days || typeof db.days !== 'object') db.days = {};
+    if (DEMO && !db.seeded) seedDemo();
+  }
+  function seedDemo() {
+    db.settings.pricesConfirmed = true;
+    var t = todayIso(), y = shiftDay(t, -1), n = Date.now();
+    var mk = function (date, name, site, type, a, k, nights, wood, pay, extra) {
+      return Object.assign({ id: 'demo' + name.replace(/\W/g, ''), date: date, name: name, site: site, type: type, adults: a, kids: k, other: 0,
+        nights: nights, wood: wood, cleaning: '', donation: '', pay: pay, checkNo: '', note: '', amountOverride: null, createdAt: n++ }, extra || {});
+    };
+    db.entries = [
+      mk(y, 'Peterson, Gary', '3', 'full', 2, 0, 3, 1, 'credit'),
+      mk(y, 'Lopez, Maria', '', 'ada', 2, 2, 2, 0, 'check', { checkNo: '2214' }),
+      mk(t, 'Hansen, Dale', '7', 'full', 2, 1, 2, 2, 'cash', { donation: '5' }),
+      mk(t, 'Brown, Sue', '12', 'tent', 1, 0, 1, 1, 'cash', { note: 'Leaving early Sunday' })
+    ];
+    db.seeded = true;
+    save();
   }
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(db)); return true; }
@@ -104,6 +122,18 @@
     $('#homeBtn').hidden = state.view === 'home';
     var old = $('.savebar'); if (old) old.remove();
     var app = $('#app');
+    var db0 = $('#demoBar');
+    if (DEMO && !db0) {
+      db0 = document.createElement('div'); db0.id = 'demoBar'; db0.className = 'demobar';
+      db0.innerHTML = '<span>🎓 <b>PRACTICE MODE</b> — pretend campers. Nothing here is real, so try anything!</span>' +
+        '<span class="btns"><button class="btn sun" id="demoReset">Start Over</button><a class="btn ghost" href="./">Go to Real Book</a></span>';
+      document.body.insertBefore(db0, $('main'));
+      $('#demoReset').onclick = function () {
+        confirmBox('Start practice over?', 'This puts the pretend campers back the way they were.', 'Yes, start over', function () {
+          localStorage.removeItem(KEY); load(); state.view = 'home'; state.date = todayIso(); render(); toast('Practice reset');
+        });
+      };
+    }
     if (state.view === 'home') app.innerHTML = viewHome();
     else if (state.view === 'checkin') { app.innerHTML = viewCheckin(); bindCheckin(); return; }
     else if (state.view === 'sheet') app.innerHTML = viewSheet();
@@ -130,6 +160,8 @@
         '<button class="tile" data-go="totals"><span class="ico">🧮</span><span class="t">Totals &amp; Deposit</span><span class="d">Add up cash, checks &amp; credit</span></button>' +
         '<button class="tile" data-go="find"><span class="ico">🔍</span><span class="t">Find a Camper</span><span class="d">Look up someone from before</span></button>' +
         '<button class="tile" data-go="settings"><span class="ico">⚙️</span><span class="t">Prices &amp; Backup</span><span class="d">Change prices, save a backup copy</span></button>' +
+        '<a class="tile" href="guide/" style="text-decoration:none"><span class="ico">📺</span><span class="t">How-To Video</span><span class="d">Watch a 3-minute guide &amp; print instructions</span></a>' +
+        (DEMO ? '' : '<a class="tile" href="./?demo" style="text-decoration:none"><span class="ico">🎓</span><span class="t">Practice Mode</span><span class="d">Try it with pretend campers</span></a>') +
       '</div>' +
       '<div class="stats">' +
         '<div class="stat"><div class="n">' + list.length + '</div><div class="l">Check-ins today</div></div>' +
@@ -421,6 +453,7 @@
       '</div><label class="lbl" for="p-park">Campground name</label><input class="txt" id="p-park" value="' + esc(s.park) + '">' +
       '<p class="hint">Changing a price changes the totals for old check-ins too — unless "Amount actually paid" was typed in.</p>' +
       '<div class="btns" style="margin-top:12px"><button class="btn big" id="savePrices">✓ Save Prices</button></div></div>' +
+      (DEMO ? '' : '<div class="card"><h2>Practice</h2><p style="font-size:1.1rem">Want to try things out first? Practice Mode has pretend campers. It never touches the real book.</p><div class="btns"><a class="btn sun big" href="./?demo">🎓 Open Practice Mode</a></div></div>') +
       '<div class="card"><h2>Backup copy</h2><p style="font-size:1.1rem">Everything is kept on this device only. Once a week, tap <b>Save a Backup</b> — it puts a file in your Downloads folder. If the tablet ever breaks, that file brings everything back.</p>' +
         '<div class="btns"><button class="btn sun big" id="backupBtn">💾 Save a Backup</button><button class="btn ghost" id="csvBtn">📊 Spreadsheet (CSV)</button><button class="btn ghost" id="restoreBtn">📂 Restore from Backup</button></div>' +
         '<input type="file" id="restoreFile" accept=".json,application/json" hidden>' +
