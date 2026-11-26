@@ -281,7 +281,7 @@
       '<div class="card"><div class="step"><span class="num">5</span><h2>How did they pay?</h2></div><div class="choices pay" id="pays">' + payBtns + '</div>' +
         '<div id="checkNoWrap"' + (d.pay === 'check' ? '' : ' hidden') + '><label class="lbl" for="f-checkno">Check number (optional)</label><input class="txt" id="f-checkno" inputmode="numeric" value="' + esc(d.checkNo) + '"></div>' +
         '<div class="proof"><div class="lbl">Proof of payment <span style="font-weight:400;color:var(--muted)">(picks cash or check for you)</span></div>' +
-          '<div class="btns"><button type="button" class="btn" data-proof="check">📸 Check (front &amp; back)</button><button type="button" class="btn" data-proof="cash">📸 Cash</button><button type="button" class="btn" data-proof="credit">📸 Card receipt</button></div>' +
+          '<div class="btns"><button type="button" class="btn" data-proof="check">📸 Check (front &amp; back)</button><button type="button" class="btn" data-proof="cash">📸 Cash</button><button type="button" class="btn" data-proof="credit">📸 Card (front &amp; back)</button></div>' +
           '<div class="thumbs" id="payThumbs">' + thumbs(d.payPhotos) + '</div><div id="ocrNote" class="ocrnote" hidden></div></div>' +
       '</div>' +
       messCard(d) +
@@ -425,7 +425,7 @@
           (d.payPhotos = d.payPhotos || []).push(p);
           $('#payThumbs').insertAdjacentHTML('beforeend', thumbs([p])); hydratePhotos($('#payThumbs'));
           toast('📸 Saved · logged ' + p.at);
-          if (side === 'front') checkOcr(data);
+          if (side === 'front' && kind === 'check') checkOcr(data);
         });
         return;
       } else if (b.id === 'messPayPhoto' && (d.messPaid === 'check' || d.messPaid === 'credit')) {
@@ -739,13 +739,14 @@
     toast('✓ Checked in ' + rec.name + ' — ' + money(rec.total)); go('sheet', { date: rec.date });
     return rec;
   }
-  // Proof shots for a payment. Check = front then back; credit = the receipt / card-reader screen
-  // (never the card itself — a card photo is everything a thief needs).
+  // Proof shots for a payment. Check and card = front then back (host asked for card photos;
+  // the back-of-card hint says to cover the 3-digit code).
   var PROOF = {
     check: [{ side: 'front', title: 'Check — FRONT', hint: 'Lay the check flat, front side up, inside the box.', frame: 'check', stamp: 'Check front' },
             { side: 'back', title: 'Now flip it over — BACK of the check', hint: 'Back side up, so the signature / endorsement shows.', frame: 'check', stamp: 'Check back' }],
     cash: [{ side: '', title: 'Photo of the cash', hint: 'Spread the bills out on a table so each one shows.', frame: '', stamp: 'Cash' }],
-    credit: [{ side: 'receipt', title: 'Photo of the card receipt', hint: 'Take a picture of the receipt or the card-reader screen showing it went through. Do not photograph the card itself.', frame: '', stamp: 'Card receipt' }]
+    credit: [{ side: 'front', title: 'Card — FRONT', hint: 'Lay the card flat, front side up, inside the box.', frame: 'check', stamp: 'Card front' },
+             { side: 'back', title: 'Now flip it over — BACK of the card', hint: 'Cover the 3-digit code with your thumb, then take the picture so the signature shows.', frame: 'check', stamp: 'Card back' }]
   };
   function proofSequence(kind, stampTail, entryId, each) {
     var steps = PROOF[kind] || [];
@@ -761,17 +762,18 @@
     })(0);
   }
   function proofMissing(e) {
-    if (e.pay !== 'check') return '';
+    if (e.pay !== 'check' && e.pay !== 'credit') return '';
+    var what = e.pay === 'check' ? ' of the check' : ' of the card';
     var sides = (e.payPhotos || []).map(function (p) { return p.side; });
     if (!sides.length) return '';
-    if (sides.indexOf('front') < 0) return 'front of the check';
-    if (sides.indexOf('back') < 0) return 'back of the check';
+    if (sides.indexOf('front') < 0) return 'front' + what;
+    if (sides.indexOf('back') < 0) return 'back' + what;
     return '';
   }
   // After a fast check-in: one more tap to photograph the cash/check (optional).
   function offerProof(rec) {
     var kind = rec.pay;
-    var what = kind === 'check' ? 'the check (front and back)' : kind === 'cash' ? 'the cash' : 'the card receipt';
+    var what = kind === 'check' ? 'the check (front and back)' : kind === 'cash' ? 'the cash' : 'the card (front and back)';
     var m = modal('<h2>✓ ' + esc(rec.name) + ' is checked in</h2><p style="font-size:1.15rem">Snap a photo of ' + what + ' for proof?</p>' +
       '<div class="btns"><button class="btn sun big" data-yes>📸 Yes, take the photo</button><button class="btn ghost big" data-no>No thanks</button></div>');
     $('[data-no]', m).onclick = closeModal;
@@ -780,7 +782,7 @@
       proofSequence(kind, function () { return ' · ' + rec.name + (rec.site ? ' · Site ' + rec.site : ''); }, rec.id, function (p, data, side) {
         var e = db.entries.filter(function (x) { return x.id === rec.id; })[0]; if (!e) return;
         (e.payPhotos = e.payPhotos || []).push(p); save(); render(); toast('📸 Saved · logged ' + p.at);
-        if (side !== 'front') return;
+        if (side !== 'front' || kind !== 'check') return;
         readCheck(data).then(function (r) {
           var msg = [];
           if (r.checkNo && !e.checkNo) { e.checkNo = r.checkNo; msg.push('check #' + r.checkNo); }
@@ -814,7 +816,7 @@
         (num(e.wood) ? ' · ' + e.wood + ' wood' : '') + '</div>' +
         (e.note ? '<div class="meta">📝 ' + esc(e.note) + '</div>' : '') +
         (num(e.messFee) ? '<div class="meta messtag' + (e.messPaid ? '' : ' owed') + '">' + esc(messStatus(e)) + '</div>' : '') + '</div>' +
-        '<div class="amt">' + money(paid(e)) + '<br><span class="tag ' + e.pay + '">' + esc(e.pay) + (e.checkNo ? ' #' + esc(e.checkNo) : '') + ((e.payPhotos || []).length ? ' 📸' : '') + '</span>' + (proofMissing(e) ? '<br><span class="tag followup">needs ' + esc(proofMissing(e).replace(' of the check', '')) + ' photo</span>' : '') + '</div>' +
+        '<div class="amt">' + money(paid(e)) + '<br><span class="tag ' + e.pay + '">' + esc(e.pay) + (e.checkNo ? ' #' + esc(e.checkNo) : '') + ((e.payPhotos || []).length ? ' 📸' : '') + '</span>' + (proofMissing(e) ? '<br><span class="tag followup">needs ' + esc(proofMissing(e).replace(/ of the (check|card)/, '')) + ' photo</span>' : '') + '</div>' +
         '</button>';
     }).join('') : '<div class="empty">Nobody checked in on this day yet.</div>';
     return '<h1>Daily Sheet</h1>' + dayNav() +
