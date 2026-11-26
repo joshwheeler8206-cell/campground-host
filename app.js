@@ -281,7 +281,7 @@
       '<div class="card"><div class="step"><span class="num">5</span><h2>How did they pay?</h2></div><div class="choices pay" id="pays">' + payBtns + '</div>' +
         '<div id="checkNoWrap"' + (d.pay === 'check' ? '' : ' hidden') + '><label class="lbl" for="f-checkno">Check number (optional)</label><input class="txt" id="f-checkno" inputmode="numeric" value="' + esc(d.checkNo) + '"></div>' +
         '<div class="proof"><div class="lbl">Proof of payment <span style="font-weight:400;color:var(--muted)">(picks cash or check for you)</span></div>' +
-          '<div class="btns"><button type="button" class="btn" data-proof="check">📸 Photo of the check</button><button type="button" class="btn" data-proof="cash">📸 Photo of the cash</button></div>' +
+          '<div class="btns"><button type="button" class="btn" data-proof="check">📸 Check (front &amp; back)</button><button type="button" class="btn" data-proof="cash">📸 Cash</button><button type="button" class="btn" data-proof="credit">📸 Card receipt</button></div>' +
           '<div class="thumbs" id="payThumbs">' + thumbs(d.payPhotos) + '</div><div id="ocrNote" class="ocrnote" hidden></div></div>' +
       '</div>' +
       messCard(d) +
@@ -307,7 +307,7 @@
           return '<button type="button" class="choice ' + p[0] + ((d.messPaid || '') === p[0] ? ' on' : '') + '" data-messpay="' + p[0] + '">' + p[1] + '</button>';
         }).join('') + '</div>' +
         '<div id="messCheckWrap"' + (d.messPaid === 'check' ? '' : ' hidden') + '><label class="lbl" for="f-messcheck">Check number</label><input class="txt" id="f-messcheck" inputmode="numeric" value="' + esc(d.messCheckNo || '') + '"></div>' +
-        '<div id="messProofWrap"' + (d.messPaid === 'cash' || d.messPaid === 'check' ? '' : ' hidden') + '><button type="button" class="btn" id="messPayPhoto">📸 Photo of the payment</button><div class="thumbs" id="messPayThumbs">' + thumbs(d.messPayPhotos) + '</div></div>' +
+        '<div id="messProofWrap"' + (d.messPaid ? '' : ' hidden') + '><button type="button" class="btn" id="messPayPhoto">📸 Photo of the payment</button><div class="thumbs" id="messPayThumbs">' + thumbs(d.messPayPhotos) + '</div></div>' +
       '</div></div>';
   }
   function stepper(key, label, val, min) {
@@ -421,15 +421,18 @@
         var kind = b.dataset.proof;
         d.pay = kind; app.querySelectorAll('[data-pay]').forEach(function (x) { x.classList.toggle('on', x.dataset.pay === kind); });
         $('#checkNoWrap').hidden = kind !== 'check'; b.classList.remove('pulse'); refreshTotal();
-        snapPhoto({ title: kind === 'check' ? 'Photo of the check' : 'Photo of the cash', frame: kind === 'check' ? 'check' : '',
-          hint: kind === 'check' ? 'Lay the check flat and fit it inside the box. Front side up.' : 'Spread the bills out on a table so each one shows.',
-          stamp: proofStamp(d, kind === 'check' ? 'Check' : 'Cash') }, function (data) {
-          savePhoto(data, 'pay-' + kind, d.id).then(function (p) {
-            (d.payPhotos = d.payPhotos || []).push(p);
-            $('#payThumbs').insertAdjacentHTML('beforeend', thumbs([p])); hydratePhotos($('#payThumbs'));
-            toast('📸 Saved · logged ' + p.at);
-            if (kind === 'check') checkOcr(data);
-          }).catch(function () { alertBox('Photo not saved', 'The tablet could not store the picture. Try again.'); });
+        proofSequence(kind, function () { readForm(); return (d.name ? ' · ' + d.name : '') + (d.site ? ' · Site ' + d.site : ''); }, d.id, function (p, data, side) {
+          (d.payPhotos = d.payPhotos || []).push(p);
+          $('#payThumbs').insertAdjacentHTML('beforeend', thumbs([p])); hydratePhotos($('#payThumbs'));
+          toast('📸 Saved · logged ' + p.at);
+          if (side === 'front') checkOcr(data);
+        });
+        return;
+      } else if (b.id === 'messPayPhoto' && (d.messPaid === 'check' || d.messPaid === 'credit')) {
+        proofSequence(d.messPaid, function () { readForm(); return ' · Cleaning fee' + (d.name ? ' · ' + d.name : ''); }, d.id, function (p) {
+          (d.messPayPhotos = d.messPayPhotos || []).push(p);
+          $('#messPayThumbs').insertAdjacentHTML('beforeend', thumbs([p])); hydratePhotos($('#messPayThumbs'));
+          toast('📸 Saved · logged ' + p.at);
         });
         return;
       } else if (b.id === 'messPhotoBtn' || b.id === 'messPayPhoto') {
@@ -452,7 +455,7 @@
         d.messPaidDate = d.messPaid ? (d.messPaidDate || todayIso()) : '';
         app.querySelectorAll('[data-messpay]').forEach(function (x) { x.classList.toggle('on', x === b); });
         $('#messCheckWrap').hidden = d.messPaid !== 'check';
-        $('#messProofWrap').hidden = !(d.messPaid === 'cash' || d.messPaid === 'check');
+        $('#messProofWrap').hidden = !d.messPaid;
         return;
       } else if (b.id === 'messPrint') {
         readForm(); printMess(d); return;
@@ -494,6 +497,11 @@
     if (!d.pay) missing.push('how they paid (step 5)');
     if (missing.length) { alertBox('Almost done!', 'Please fill in ' + missing.join(' and ') + '.'); return; }
     if (d.amountOverride != null && isNaN(parseFloat(d.amountOverride))) { alertBox('Check the amount', 'The "Amount actually paid" box needs a number, or leave it empty.'); return; }
+    var miss = proofMissing(d);
+    if (miss && !saveEntry._ok) {
+      confirmBox('No photo of the ' + miss + ' yet', 'You can save now and add it later, or go back and take it.', 'Save anyway', function () { saveEntry._ok = true; saveEntry(); saveEntry._ok = false; });
+      return;
+    }
     var rec = JSON.parse(JSON.stringify(d));
     rec.rate = rateOf(d); rec.woodRate = woodRateOf(d);
     rec.total = paid(rec);
@@ -541,7 +549,7 @@
   function nowStamp() { var d = new Date(); return shortDate(iso(d)) + ' ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
   function thumbs(list) {
     return (list || []).map(function (p) {
-      return '<button type="button" class="thumb" data-photo="' + esc(p.id) + '" aria-label="Open photo"><img alt=""><span>' + esc(p.at || '') + '</span></button>';
+      return '<button type="button" class="thumb" data-photo="' + esc(p.id) + '" aria-label="Open photo"><img alt=""><span>' + (p.side ? esc(p.side.toUpperCase()) + ' · ' : '') + esc(p.at || '') + '</span></button>';
     }).join('');
   }
   function hydratePhotos(root) {
@@ -717,7 +725,7 @@
       b.onclick = function () {
         d.pay = b.dataset.fpay; closeModal();
         var rec = saveDraftNow(d);
-        if (rec && (d.pay === 'cash' || d.pay === 'check')) offerProof(rec);
+        if (rec) offerProof(rec);
       };
     });
     $('[data-fedit]', m).onclick = function () { closeModal(); state.draft = d; go('checkin'); toast('Filled in from their last visit'); };
@@ -731,31 +739,58 @@
     toast('✓ Checked in ' + rec.name + ' — ' + money(rec.total)); go('sheet', { date: rec.date });
     return rec;
   }
+  // Proof shots for a payment. Check = front then back; credit = the receipt / card-reader screen
+  // (never the card itself — a card photo is everything a thief needs).
+  var PROOF = {
+    check: [{ side: 'front', title: 'Check — FRONT', hint: 'Lay the check flat, front side up, inside the box.', frame: 'check', stamp: 'Check front' },
+            { side: 'back', title: 'Now flip it over — BACK of the check', hint: 'Back side up, so the signature / endorsement shows.', frame: 'check', stamp: 'Check back' }],
+    cash: [{ side: '', title: 'Photo of the cash', hint: 'Spread the bills out on a table so each one shows.', frame: '', stamp: 'Cash' }],
+    credit: [{ side: 'receipt', title: 'Photo of the card receipt', hint: 'Take a picture of the receipt or the card-reader screen showing it went through. Do not photograph the card itself.', frame: '', stamp: 'Card receipt' }]
+  };
+  function proofSequence(kind, stampTail, entryId, each) {
+    var steps = PROOF[kind] || [];
+    (function next(i) {
+      if (i >= steps.length) return;
+      var st = steps[i];
+      snapPhoto({ title: st.title, hint: st.hint, frame: st.frame, stamp: (db.settings.park || 'Campground') + ' · ' + st.stamp + ' · ' + nowStamp() + stampTail() }, function (data) {
+        savePhoto(data, 'pay-' + kind + (st.side ? '-' + st.side : ''), entryId).then(function (p) {
+          p.side = st.side; each(p, data, st.side);
+          if (i + 1 < steps.length) setTimeout(function () { next(i + 1); }, 250);
+        }).catch(function () { alertBox('Photo not saved', 'The tablet could not store the picture. Try again.'); });
+      });
+    })(0);
+  }
+  function proofMissing(e) {
+    if (e.pay !== 'check') return '';
+    var sides = (e.payPhotos || []).map(function (p) { return p.side; });
+    if (!sides.length) return '';
+    if (sides.indexOf('front') < 0) return 'front of the check';
+    if (sides.indexOf('back') < 0) return 'back of the check';
+    return '';
+  }
   // After a fast check-in: one more tap to photograph the cash/check (optional).
   function offerProof(rec) {
     var kind = rec.pay;
-    var m = modal('<h2>✓ ' + esc(rec.name) + ' is checked in</h2><p style="font-size:1.15rem">Snap a photo of the ' + kind + ' for proof?</p>' +
+    var what = kind === 'check' ? 'the check (front and back)' : kind === 'cash' ? 'the cash' : 'the card receipt';
+    var m = modal('<h2>✓ ' + esc(rec.name) + ' is checked in</h2><p style="font-size:1.15rem">Snap a photo of ' + what + ' for proof?</p>' +
       '<div class="btns"><button class="btn sun big" data-yes>📸 Yes, take the photo</button><button class="btn ghost big" data-no>No thanks</button></div>');
     $('[data-no]', m).onclick = closeModal;
     $('[data-yes]', m).onclick = function () {
       closeModal();
-      snapPhoto({ title: 'Photo of the ' + kind, frame: kind === 'check' ? 'check' : '',
-        hint: kind === 'check' ? 'Lay the check flat and fit it inside the box. Front side up.' : 'Spread the bills out on a table so each one shows.',
-        stamp: (db.settings.park || 'Campground') + ' · ' + (kind === 'check' ? 'Check' : 'Cash') + ' · ' + nowStamp() + ' · ' + rec.name + (rec.site ? ' · Site ' + rec.site : '') }, function (data) {
-        savePhoto(data, 'pay-' + kind, rec.id).then(function (p) {
-          var e = db.entries.filter(function (x) { return x.id === rec.id; })[0]; if (!e) return;
-          (e.payPhotos = e.payPhotos || []).push(p); save(); render(); toast('📸 Saved · logged ' + p.at);
-          if (kind !== 'check') return;
-          readCheck(data).then(function (r) {
-            var msg = [];
-            if (r.checkNo && !e.checkNo) { e.checkNo = r.checkNo; msg.push('check #' + r.checkNo); }
-            if (r.amount != null && Math.abs(r.amount - paid(e)) >= 0.005) msg.push('heads up: the check looks like ' + money(r.amount) + ', total is ' + money(paid(e)));
-            save(); render(); if (msg.length) toast(msg.join(' · '));
-          }).catch(function () {});
-        });
+      proofSequence(kind, function () { return ' · ' + rec.name + (rec.site ? ' · Site ' + rec.site : ''); }, rec.id, function (p, data, side) {
+        var e = db.entries.filter(function (x) { return x.id === rec.id; })[0]; if (!e) return;
+        (e.payPhotos = e.payPhotos || []).push(p); save(); render(); toast('📸 Saved · logged ' + p.at);
+        if (side !== 'front') return;
+        readCheck(data).then(function (r) {
+          var msg = [];
+          if (r.checkNo && !e.checkNo) { e.checkNo = r.checkNo; msg.push('check #' + r.checkNo); }
+          if (r.amount != null && Math.abs(r.amount - paid(e)) >= 0.005) msg.push('heads up: the check looks like ' + money(r.amount) + ', total is ' + money(paid(e)));
+          save(); if (state.view === 'sheet') render(); if (msg.length) toast(msg.join(' · '));
+        }).catch(function () {});
       });
     };
   }
+
 
   // ---------- Daily sheet ----------
   function dayNav() {
@@ -779,7 +814,7 @@
         (num(e.wood) ? ' · ' + e.wood + ' wood' : '') + '</div>' +
         (e.note ? '<div class="meta">📝 ' + esc(e.note) + '</div>' : '') +
         (num(e.messFee) ? '<div class="meta messtag' + (e.messPaid ? '' : ' owed') + '">' + esc(messStatus(e)) + '</div>' : '') + '</div>' +
-        '<div class="amt">' + money(paid(e)) + '<br><span class="tag ' + e.pay + '">' + esc(e.pay) + (e.checkNo ? ' #' + esc(e.checkNo) : '') + ((e.payPhotos || []).length ? ' 📸' : '') + '</span></div>' +
+        '<div class="amt">' + money(paid(e)) + '<br><span class="tag ' + e.pay + '">' + esc(e.pay) + (e.checkNo ? ' #' + esc(e.checkNo) : '') + ((e.payPhotos || []).length ? ' 📸' : '') + '</span>' + (proofMissing(e) ? '<br><span class="tag followup">needs ' + esc(proofMissing(e).replace(' of the check', '')) + ' photo</span>' : '') + '</div>' +
         '</button>';
     }).join('') : '<div class="empty">Nobody checked in on this day yet.</div>';
     return '<h1>Daily Sheet</h1>' + dayNav() +
