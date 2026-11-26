@@ -920,7 +920,7 @@
         row('Saved data', Math.round(used / 1024) + ' KB') + row('Online', navigator.onLine ? 'yes' : 'no') + row('Page', location.href) +
         Object.keys(info).map(function (k) { return row(k, info[k]); }).join('') + '</table></div>';
   }
-  function setMode(mode) { db.settings.mode = mode; save(); go(modeHome()); }
+  function setMode(mode) { db.settings.mode = mode; save(); try { if (window.AndroidKiosk) window.AndroidKiosk.modeChanged(mode); } catch (e) {} go(modeHome()); }
 
   // ---------- Print ----------
   function printSheet(mode) {
