@@ -38,7 +38,8 @@
     },
     entries: [],
     days: {},
-    feedback: []
+    feedback: [],
+    tips: []
   };
 
   // ---------- storage ----------
@@ -51,6 +52,7 @@
     if (!Array.isArray(db.entries)) db.entries = [];
     if (!db.days || typeof db.days !== 'object') db.days = {};
     if (!Array.isArray(db.feedback)) db.feedback = [];
+    if (!Array.isArray(db.tips)) db.tips = [];
     if (DEMO && !db.seeded) seedDemo();
     if (KIOSK && !db.settings.kioskInit) { db.settings.kioskInit = true; db.settings.mode = 'cantril'; save(); }
     lockRates();
@@ -221,6 +223,7 @@
       '<div class="big-grid">' +
         '<button class="tile primary" data-new><span class="ico">🏕️</span><span class="t">Check In a Camper</span><span class="d">Write down a new camper and what they paid</span></button>' +
         '<button class="tile primary" data-go="repeat"><span class="ico">⚡</span><span class="t">Repeat Camper</span><span class="d">Been here before? Two taps and done</span></button>' +
+        '<button class="tile" data-tip><span class="ico">🙏</span><span class="t">Log a Tip</span><span class="d">A camper left you a tip — kept separate</span></button>' +
         '<button class="tile" data-go="sheet"><span class="ico">📋</span><span class="t">Today\'s Sheet</span><span class="d">See, fix or print everyone checked in</span></button>' +
         '<button class="tile" data-go="totals"><span class="ico">🧮</span><span class="t">Totals &amp; Deposit</span><span class="d">Add up cash, checks &amp; credit</span></button>' +
         '<button class="tile" data-go="find"><span class="ico">🔍</span><span class="t">Find a Camper</span><span class="d">Look up someone from before</span></button>' +
@@ -276,8 +279,8 @@
         stepper('wood', 'Bundles of wood (' + money(woodRateOf(d)) + ' each)', d.wood, 0) +
       '</div><div class="row2">' +
         '<div><label class="lbl" for="f-cleaning">Cleaning fee</label><div class="money"><input class="txt" id="f-cleaning" inputmode="decimal" value="' + esc(d.cleaning) + '" placeholder="0.00"></div></div>' +
-        '<div><label class="lbl" for="f-donation">Donation</label><div class="money"><input class="txt" id="f-donation" inputmode="decimal" value="' + esc(d.donation) + '" placeholder="0.00"></div></div>' +
-      '</div></div>' +
+        '<div><label class="lbl" for="f-donation">Donation <span style="font-weight:400;color:var(--muted)">(to the park)</span></label><div class="money"><input class="txt" id="f-donation" inputmode="decimal" value="' + esc(d.donation) + '" placeholder="0.00"></div></div>' +
+      '</div><div class="row2"><div><label class="lbl" for="f-tip">🙏 Tip for the hosts <span style="font-weight:400;color:var(--muted)">(yours — kept out of the park money)</span></label><div class="money"><input class="txt" id="f-tip" inputmode="decimal" value="' + esc(d.tip || '') + '" placeholder="0.00"></div></div><div></div></div></div>' +
       '<div class="card"><div class="step"><span class="num">5</span><h2>How did they pay?</h2></div><div class="choices pay" id="pays">' + payBtns + '</div>' +
         '<div id="checkNoWrap"' + (d.pay === 'check' ? '' : ' hidden') + '><label class="lbl" for="f-checkno">Check number (optional)</label><input class="txt" id="f-checkno" inputmode="numeric" value="' + esc(d.checkNo) + '"></div>' +
         '<div class="proof"><div class="lbl">Proof of payment <span style="font-weight:400;color:var(--muted)">(picks cash or check for you)</span></div>' +
@@ -323,6 +326,7 @@
     d.date = $('#f-date').value || todayIso();
     d.cleaning = $('#f-cleaning').value.trim();
     d.donation = $('#f-donation').value.trim();
+    d.tip = $('#f-tip') ? $('#f-tip').value.trim() : '';
     d.checkNo = $('#f-checkno') ? $('#f-checkno').value.trim() : '';
     d.note = $('#f-note').value.trim();
     if ($('#f-messfee')) {
@@ -793,6 +797,41 @@
   }
 
 
+  // ---------- Tips for the hosts (their own money, never in the park deposit) ----------
+  function tipsWhere(pred) {
+    var out = [];
+    db.entries.forEach(function (e) { if (num(e.tip) > 0 && pred(e.date)) out.push({ date: e.date, amt: num(e.tip), from: e.name, note: 'at check-in' + (e.site ? ' · site ' + e.site : '') }); });
+    db.tips.forEach(function (t) { if (num(t.amt) > 0 && pred(t.date)) out.push({ id: t.id, date: t.date, amt: num(t.amt), from: t.from, note: t.note }); });
+    return out.sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+  }
+  function tipModal() {
+    var m = modal('<h2>🙏 Log a Tip</h2><p class="hint" style="font-size:1.05rem">Tips are yours. They are kept out of the park totals and the deposit.</p>' +
+      '<label class="lbl" for="t-amt">How much?</label><div class="money"><input class="txt" id="t-amt" inputmode="decimal" placeholder="0.00"></div>' +
+      '<label class="lbl" for="t-from">From who? <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input class="txt" id="t-from" list="pastNames2" autocapitalize="words" placeholder="Name or site #">' +
+      '<datalist id="pastNames2">' + repeatCampers().slice(0, 60).map(function (e) { return '<option value="' + esc(e.name) + '">'; }).join('') + '</datalist>' +
+      '<label class="lbl" for="t-note">Note <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input class="txt" id="t-note" placeholder="Left in the cabin, thank-you card…">' +
+      '<div class="btns" style="margin-top:16px"><button class="btn sun big" data-tsave>✓ Save Tip</button><button class="btn ghost big" data-tno>Cancel</button></div>');
+    $('#t-amt', m).focus();
+    $('[data-tno]', m).onclick = closeModal;
+    $('[data-tsave]', m).onclick = function () {
+      var a = num($('#t-amt', m).value);
+      if (!(a > 0)) return toast('Type how much the tip was');
+      db.tips.push({ id: 't' + uid(), date: todayIso(), amt: a, from: $('#t-from', m).value.trim(), note: $('#t-note', m).value.trim(), createdAt: Date.now() });
+      if (save()) { closeModal(); toast('🙏 Tip saved — ' + money(a)); render(); }
+    };
+  }
+  function tipsCard(list, month) {
+    var sum = list.reduce(function (t, x) { return t + x.amt; }, 0);
+    var rows = list.map(function (t) {
+      return '<tr><td>' + esc(shortDate(t.date)) + '</td><td>' + esc(t.from || '—') + '</td><td>' + esc(t.note || '') + '</td><td class="r">' + money(t.amt) +
+        (t.id ? ' <button class="btn ghost" data-tipdel="' + esc(t.id) + '" aria-label="Delete tip">✕</button>' : '') + '</td></tr>';
+    }).join('');
+    return '<div class="card tips"><h2>🙏 Tips for the hosts — ' + money(sum) + '</h2>' +
+      '<p class="hint" style="font-size:1.05rem">Your money — not part of the park totals or the deposit. Keep it out of the deposit bag.</p>' +
+      (rows ? '<table class="tot-table"><tbody>' + rows + '</tbody></table>' : '<p class="hint">No tips ' + (month ? 'this month' : 'this day') + ' yet.</p>') +
+      '<div class="btns" style="margin-top:12px"><button class="btn sun" data-tip>🙏 Log a Tip</button></div></div>';
+  }
+
   // ---------- Daily sheet ----------
   function dayNav() {
     var isToday = state.date === todayIso();
@@ -814,6 +853,7 @@
         '<div class="meta">' + esc(typeName(e.type)) + ' · ' + e.nights + ' night' + (e.nights == 1 ? '' : 's') + (ppl.length ? ' · ' + ppl.join(', ') : '') +
         (num(e.wood) ? ' · ' + e.wood + ' wood' : '') + '</div>' +
         (e.note ? '<div class="meta">📝 ' + esc(e.note) + '</div>' : '') +
+        (num(e.tip) ? '<div class="meta">🙏 Tip for the hosts ' + money(e.tip) + '</div>' : '') +
         (num(e.messFee) ? '<div class="meta messtag' + (e.messPaid ? '' : ' owed') + '">' + esc(messStatus(e)) + '</div>' : '') + '</div>' +
         '<div class="amt">' + money(paid(e)) + '<br><span class="tag ' + e.pay + '">' + esc(e.pay) + (e.checkNo ? ' #' + esc(e.checkNo) : '') + ((e.payPhotos || []).length ? ' 📸' : '') + '</span>' + (proofMissing(e) ? '<br><span class="tag followup">needs ' + esc(proofMissing(e).replace(/ of the (check|card)/, '')) + ' photo</span>' : '') + '</div>' +
         '</button>';
@@ -880,6 +920,7 @@
         '<div class="paybox check"><div>📝 Checks</div><div class="n">' + money(s.check) + '</div></div>' +
         '<div class="paybox credit"><div>💳 Credit</div><div class="n">' + money(s.credit) + '</div></div>' +
       '</div></div>' + depositBlock +
+      tipsCard(tipsWhere(function (dt) { return month ? dt.slice(0, 7) === state.date.slice(0, 7) : dt === state.date; }), month) +
       '<div class="btns"><button class="btn big" data-print="' + (month ? 'month' : 'day') + '">🖨 Print ' + (month ? 'month report' : 'day sheet') + '</button></div>';
   }
   function updateOS() {
@@ -971,13 +1012,13 @@
     document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   }
   function csv() {
-    var head = ['Date', 'Name', 'Adults', 'Kids', 'Other', 'Space', 'Site Type', 'Nights', 'Cash', 'Check', 'Credit', 'Check #', 'Cleaning', 'Donation', 'Wood', 'Total', 'Notes'];
+    var head = ['Date', 'Name', 'Adults', 'Kids', 'Other', 'Space', 'Site Type', 'Nights', 'Cash', 'Check', 'Credit', 'Check #', 'Cleaning', 'Donation', 'Wood', 'Total', 'Tip (hosts)', 'Notes'];
     var q = function (v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
     var rows = db.entries.slice().sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : (a.createdAt || 0) - (b.createdAt || 0); }).map(function (e) {
       var p = paid(e), c = calc(e);
       return [e.date, e.name, e.adults, e.kids, e.other, e.site, typeName(e.type), e.nights,
         e.pay === 'cash' ? p.toFixed(2) : '', e.pay === 'check' ? p.toFixed(2) : '', e.pay === 'credit' ? p.toFixed(2) : '',
-        e.checkNo, c.cleaning ? c.cleaning.toFixed(2) : '', c.donation ? c.donation.toFixed(2) : '', e.wood || '', p.toFixed(2), e.note].map(q).join(',');
+        e.checkNo, c.cleaning ? c.cleaning.toFixed(2) : '', c.donation ? c.donation.toFixed(2) : '', e.wood || '', p.toFixed(2), num(e.tip) ? num(e.tip).toFixed(2) : '', e.note].map(q).join(',');
     });
     return [head.join(',')].concat(rows).join('\r\n');
   }
@@ -1345,6 +1386,7 @@
       '<tr><td><b>Grand Total</b></td><td class="r"><b>' + money(s.grand) + '</b></td></tr></table>' +
       '<table><tr><td>Cash</td><td class="r">' + money(s.cash) + '</td></tr><tr><td>Checks</td><td class="r">' + money(s.check) + '</td></tr><tr><td>Credit</td><td class="r">' + money(s.credit) + '</td></tr>' +
       '<tr><td><b>Deposit (cash + checks)</b></td><td class="r"><b>' + money(deposit) + '</b></td></tr>' +
+      '<tr><td>Tips for hosts (not in deposit)</td><td class="r">' + money(tipsWhere(function (dt) { return month ? dt.slice(0, 7) === state.date.slice(0, 7) : dt === state.date; }).reduce(function (t, x) { return t + x.amt; }, 0)) + '</td></tr>' +
       (month ? '' : '<tr><td>Counted</td><td class="r">' + (counted == null ? '________' : money(counted)) + '</td></tr><tr><td>Over / Short</td><td class="r">' + (os || '________') + '</td></tr>') +
       '</table></div>';
     var ps = $('#printSheet'); if (!ps) { ps = document.createElement('div'); ps.id = 'printSheet'; document.body.appendChild(ps); }
@@ -1359,6 +1401,11 @@
     app.onclick = function (ev) {
       var b = ev.target.closest('button'); if (!b) return;
       if (b.dataset.go) { if (b.dataset.go === 'repeat') state.rq = ''; return go(b.dataset.go); }
+      if (b.hasAttribute('data-tip')) return tipModal();
+      if (b.dataset.tipdel) {
+        var tid = b.dataset.tipdel;
+        return confirmBox('Delete this tip?', 'It will be removed from the tips list.', 'Yes, delete it', function () { db.tips = db.tips.filter(function (t) { return t.id !== tid; }); save(); render(); }, true);
+      }
       if (b.dataset.repeat) { var pv = db.entries.filter(function (x) { return x.id === b.dataset.repeat; })[0]; if (pv) fastCheckin(pv); return; }
       if (b.hasAttribute('data-new')) { state.draft = blankEntry(); if (state.view === 'home') state.draft.date = todayIso(); return go('checkin'); }
       if (b.dataset.edit) {
@@ -1437,6 +1484,7 @@
           db.days = Object.assign({}, data.days || {}, db.days);
           if (Array.isArray(data.feedback)) { var fbId = {}; db.feedback.forEach(function (x) { fbId[x.id] = x; }); data.feedback.forEach(function (x) { if (x && x.id) fbId[x.id] = x; }); db.feedback = Object.keys(fbId).map(function (k) { return fbId[k]; }); }
           if (data.settings) { db.settings = Object.assign({}, db.settings, data.settings); db.settings.prices = Object.assign({}, DEFAULTS.settings.prices, data.settings.prices || {}); }
+          if (Array.isArray(data.tips)) { var tId = {}; db.tips.forEach(function (x) { tId[x.id] = x; }); data.tips.forEach(function (x) { if (x && x.id) tId[x.id] = x; }); db.tips = Object.keys(tId).map(function (k) { return tId[k]; }); }
           if (Array.isArray(data.photos)) data.photos.forEach(function (p) { if (p && p.id && p.data) photoPut(p).catch(function () {}); });
           lockRates(); save(); toast('✓ Backup restored'); render();
         });
