@@ -53,8 +53,8 @@
     if (!db.days || typeof db.days !== 'object') db.days = {};
     if (!Array.isArray(db.feedback)) db.feedback = [];
     if (!Array.isArray(db.tips)) db.tips = [];
-    if (DEMO && !db.seeded) seedDemo();
-    if (KIOSK && !db.settings.kioskInit) { db.settings.kioskInit = true; db.settings.mode = 'cantril'; save(); }
+    if (DEMO && db.seeded !== 2) seedDemo();
+    if (KIOSK && !DEMO && !db.settings.kioskInit) { db.settings.kioskInit = true; db.settings.mode = 'cantril'; save(); }
     lockRates();
   }
   // Every check-in remembers the price it was charged, so changing prices later
@@ -78,21 +78,68 @@
     db.settings.pricesConfirmed = true;
     var t = todayIso(), y = shiftDay(t, -1), n = Date.now();
     var mk = function (date, name, site, type, a, k, nights, wood, pay, extra) {
-      return Object.assign({ id: 'demo' + name.replace(/\W/g, ''), date: date, name: name, site: site, type: type, adults: a, kids: k, other: 0,
+      return Object.assign({ id: 'demo' + name.replace(/\W/g, '') + date.replace(/-/g, ''), date: date, name: name, site: site, type: type, adults: a, kids: k, other: 0,
         nights: nights, wood: wood, cleaning: '', donation: '', pay: pay, checkNo: '', note: '', amountOverride: null, createdAt: n++ }, extra || {});
     };
+    var y2 = shiftDay(t, -2), w = shiftDay(t, -9), stamp = function (d) { return shortDate(d) + ' 4:12 PM'; };
     db.entries = [
+      // last week — makes these campers show up under "Repeat Camper"
+      mk(w, 'Peterson, Gary', '3', 'full', 2, 0, 2, 1, 'credit', { payPhotos: [{ id: 'demoph-receipt', at: stamp(w), side: 'receipt' }] }),
+      mk(w, 'Nguyen, Linh', '9', 'ew', 2, 2, 3, 2, 'cash', { tip: '10', payPhotos: [{ id: 'demoph-cash', at: stamp(w), side: '' }] }),
+      mk(y2, 'Lopez, Maria', '', 'ada', 2, 2, 2, 0, 'check', { checkNo: '2214',
+        payPhotos: [{ id: 'demoph-checkf', at: stamp(y2), side: 'front' }, { id: 'demoph-checkb', at: stamp(y2), side: 'back' }],
+        messFee: '50', messNote: 'Trash left inside, dishes in the sink, mud on the floors', messAt: stamp(y), messPaid: '',
+        messPhotos: [{ id: 'demoph-mess', at: stamp(y) }] }),
       mk(y, 'Peterson, Gary', '3', 'full', 2, 0, 3, 1, 'credit'),
-      mk(y, 'Lopez, Maria', '', 'ada', 2, 2, 2, 0, 'check', { checkNo: '2214' }),
-      mk(t, 'Hansen, Dale', '7', 'full', 2, 1, 2, 2, 'cash', { donation: '5' }),
+      mk(t, 'Hansen, Dale', '7', 'full', 2, 1, 2, 2, 'cash', { donation: '5', tip: '5' }),
       mk(t, 'Brown, Sue', '12', 'tent', 1, 0, 1, 1, 'cash', { note: 'Leaving early Sunday' })
     ];
+    db.tips = [{ id: 'demotip1', date: y, amt: 20, from: 'Peterson, Gary', note: 'Left in a thank-you card', createdAt: n++ }];
+    try { seedDemoPhotos(); } catch (e) {}
     db.feedback = [
       { id: 'demofb1', by: 'host', date: y, name: 'Peterson, Gary', site: '3', stars: 5, likes: ['Friendly hosts', 'Quiet & peaceful'], needs: [], comment: 'Best little park around. Will be back in the spring.', followUp: false, createdAt: n++ },
       { id: 'demofb2', by: 'camper', date: t, name: '', site: '12', stars: 3, likes: ['Pretty park'], needs: ['Showers', 'Bugs'], comment: 'Shower on the left only had cold water.', followUp: true, createdAt: n++ }
     ];
-    db.seeded = true;
+    db.seeded = 2;
     save();
+  }
+  // Drawn "practice" pictures so Practice Mode shows what proof photos look like.
+  function seedDemoPhotos() {
+    var c = document.createElement('canvas'); c.width = 1200; c.height = 760;
+    var g = c.getContext('2d');
+    var bg = function (col) { g.fillStyle = '#3b3a36'; g.fillRect(0, 0, 1200, 760); g.fillStyle = col; };
+    var label = function (txt) { g.fillStyle = 'rgba(0,0,0,.62)'; g.fillRect(0, 710, 1200, 50); g.fillStyle = '#fff'; g.font = 'bold 26px sans-serif'; g.fillText('PRACTICE PHOTO · ' + txt, 20, 744); };
+    var shots = {};
+    // check front
+    bg('#e9f1f7'); g.fillRect(80, 150, 1040, 440); g.strokeStyle = '#7da3c4'; g.lineWidth = 4; g.strokeRect(80, 150, 1040, 440);
+    g.fillStyle = '#1d2d44'; g.font = '28px serif'; g.fillText('MARIA LOPEZ', 120, 200); g.fillText('41 Elm St, Ottumwa IA', 120, 236);
+    g.font = 'bold 30px sans-serif'; g.fillText('2214', 1000, 200); g.font = '26px sans-serif'; g.fillText('DATE  ' + shortDate(todayIso()), 820, 260);
+    g.fillText('PAY TO THE ORDER OF   Waubonsie Trail Park', 120, 340); g.strokeRect(880, 305, 210, 50); g.font = 'bold 30px sans-serif'; g.fillText('$ 160.00', 900, 342);
+    g.font = 'italic 30px serif'; g.fillText('One hundred sixty and 00/100', 120, 420); g.font = '24px sans-serif'; g.fillText('MEMO  ADA cabin, 2 nights', 120, 540);
+    g.font = 'italic 34px serif'; g.fillText('Maria Lopez', 820, 540); label('Check front'); shots['demoph-checkf'] = c.toDataURL('image/jpeg', .7);
+    // check back
+    bg('#f1f4f7'); g.fillRect(80, 150, 1040, 440); g.fillStyle = '#556'; g.font = '22px sans-serif'; g.fillText('ENDORSE HERE', 860, 200);
+    g.strokeStyle = '#99a'; for (var i = 0; i < 3; i++) { g.beginPath(); g.moveTo(820, 250 + i * 50); g.lineTo(1090, 250 + i * 50); g.stroke(); }
+    g.fillStyle = '#1d2d44'; g.font = 'italic 30px serif'; g.fillText('For deposit only', 830, 240); g.fillText('Waubonsie Trail Park', 830, 290); label('Check back'); shots['demoph-checkb'] = c.toDataURL('image/jpeg', .7);
+    // cash
+    bg('#5d4a33'); g.fillRect(0, 0, 1200, 710);
+    [[120, 170, -8], [420, 230, 6], [700, 160, -3]].forEach(function (b) {
+      g.save(); g.translate(b[0] + 170, b[1] + 80); g.rotate(b[2] * Math.PI / 180); g.fillStyle = '#c9d8b6'; g.fillRect(-170, -80, 340, 160);
+      g.strokeStyle = '#4e6b3a'; g.lineWidth = 6; g.strokeRect(-160, -70, 320, 140); g.fillStyle = '#4e6b3a'; g.font = 'bold 54px serif'; g.fillText('20', -150, -18); g.fillText('20', 90, 60);
+      g.beginPath(); g.arc(0, 0, 46, 0, 7); g.stroke(); g.restore();
+    });
+    label('Cash'); shots['demoph-cash'] = c.toDataURL('image/jpeg', .7);
+    // card receipt
+    bg('#fff'); g.fillRect(420, 60, 360, 640); g.fillStyle = '#222'; g.font = 'bold 26px monospace'; g.fillText('WAUBONSIE TRAIL', 460, 120);
+    g.font = '22px monospace'; ['SALE', 'VISA  ****1234', 'AUTH 08421', '', 'FULL HOOKUP  $50.00', 'WOOD          $5.00', '', 'TOTAL        $55.00', '', 'APPROVED'].forEach(function (l, k) { g.fillText(l, 450, 180 + k * 38); });
+    label('Card receipt'); shots['demoph-receipt'] = c.toDataURL('image/jpeg', .7);
+    // messy cabin
+    bg('#b8946a'); g.fillRect(0, 0, 1200, 710); g.fillStyle = '#8a6a48'; for (var k = 0; k < 9; k++) g.fillRect(0, k * 80, 1200, 4);
+    g.fillStyle = '#5a4632'; [[200, 520], [520, 600], [880, 470], [1000, 620]].forEach(function (m) { g.beginPath(); g.ellipse(m[0], m[1], 90, 30, 0, 0, 7); g.fill(); });
+    g.fillStyle = '#2b2b2b'; g.beginPath(); g.moveTo(640, 260); g.lineTo(820, 260); g.lineTo(790, 520); g.lineTo(670, 520); g.fill();
+    g.fillStyle = '#d6d6d6'; [[300, 300], [360, 330], [980, 300]].forEach(function (m) { g.fillRect(m[0], m[1], 60, 80); });
+    label('Cabin left messy'); shots['demoph-mess'] = c.toDataURL('image/jpeg', .7);
+    Object.keys(shots).forEach(function (id) { photoPut({ id: id, kind: 'demo', entryId: null, at: '', takenAt: Date.now(), data: shots[id] }).catch(function () {}); });
   }
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(db)); return true; }
@@ -1306,6 +1353,7 @@
         tile('📅', 'Events Nearby', 'What\'s happening this week', 'data-ext="https://villagesofvanburen.com/events/"') +
         tile('🌐', 'Internet', 'Look something up', 'data-app="com.android.chrome" data-url="https://www.google.com"') +
         tile('📒', 'Host Book', 'Check-ins, totals and feedback', 'data-go="home"', 'primary') +
+        '<a class="tile" href="./?demo" style="text-decoration:none"><span class="ico">🎓</span><span class="t">Practice Mode</span><span class="d">Try the Host Book with pretend campers</span></a>' +
       '</div>' +
       '<div class="card" style="margin-top:18px"><h2>Tablet</h2><div class="btns">' +
         '<button class="btn sun big" data-setmode="cantril">🏞️ Back to Cantril Mode</button>' +
