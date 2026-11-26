@@ -191,6 +191,7 @@
     else if (state.view === 'personal') app.innerHTML = viewPersonal();
     else if (state.view === 'dev') app.innerHTML = viewDev();
     else if (state.view === 'checkin') { app.onchange = null; app.innerHTML = viewCheckin(); bindCheckin(); return; }
+    else if (state.view === 'repeat') app.innerHTML = viewRepeat();
     else if (state.view === 'sheet') app.innerHTML = viewSheet();
     else if (state.view === 'totals') app.innerHTML = viewTotals();
     else if (state.view === 'find') app.innerHTML = viewFind();
@@ -214,9 +215,12 @@
         (db.settings.priceListSeen !== PARK_PRICES.version && parkPriceChanges().length ?
         '<div class="banner"><div><b>The park\'s prices changed.</b> ' + parkPriceChanges().map(function (t) { return esc(t.name) + ' is now ' + money(PARK_PRICES.prices[t.id]) + ' a night'; }).join(', ') + '.</div>' +
         '<button class="btn sun" data-go="settings">Review Prices</button></div>' : '')) +
+      (messOwed().length ? '<div class="banner"><div><b>🧹 Cleaning fee still owed:</b> ' + messOwed().map(function (e) { return esc(e.name) + ' ' + money(e.messFee); }).join(', ') + '</div>' +
+        '<button class="btn sun" data-edit="' + messOwed()[0].id + '">Open</button></div>' : '') +
       '<div class="hello"><h1>' + greet + '</h1><div class="today">' + esc(niceDate(t)) + '</div></div>' +
       '<div class="big-grid">' +
         '<button class="tile primary" data-new><span class="ico">🏕️</span><span class="t">Check In a Camper</span><span class="d">Write down a new camper and what they paid</span></button>' +
+        '<button class="tile primary" data-go="repeat"><span class="ico">⚡</span><span class="t">Repeat Camper</span><span class="d">Been here before? Two taps and done</span></button>' +
         '<button class="tile" data-go="sheet"><span class="ico">📋</span><span class="t">Today\'s Sheet</span><span class="d">See, fix or print everyone checked in</span></button>' +
         '<button class="tile" data-go="totals"><span class="ico">🧮</span><span class="t">Totals &amp; Deposit</span><span class="d">Add up cash, checks &amp; credit</span></button>' +
         '<button class="tile" data-go="find"><span class="ico">🔍</span><span class="t">Find a Camper</span><span class="d">Look up someone from before</span></button>' +
@@ -276,7 +280,11 @@
       '</div></div>' +
       '<div class="card"><div class="step"><span class="num">5</span><h2>How did they pay?</h2></div><div class="choices pay" id="pays">' + payBtns + '</div>' +
         '<div id="checkNoWrap"' + (d.pay === 'check' ? '' : ' hidden') + '><label class="lbl" for="f-checkno">Check number (optional)</label><input class="txt" id="f-checkno" inputmode="numeric" value="' + esc(d.checkNo) + '"></div>' +
+        '<div class="proof"><div class="lbl">Proof of payment <span style="font-weight:400;color:var(--muted)">(picks cash or check for you)</span></div>' +
+          '<div class="btns"><button type="button" class="btn" data-proof="check">📸 Photo of the check</button><button type="button" class="btn" data-proof="cash">📸 Photo of the cash</button></div>' +
+          '<div class="thumbs" id="payThumbs">' + thumbs(d.payPhotos) + '</div><div id="ocrNote" class="ocrnote" hidden></div></div>' +
       '</div>' +
+      messCard(d) +
       '<div class="card"><div class="step"><span class="num">6</span><h2>Check the total</h2></div>' +
         '<table class="breakdown" id="breakdown"></table><p class="hint" id="oldRate" hidden></p>' +
         '<label class="lbl" for="f-override">Amount actually paid <span style="font-weight:400;color:var(--muted)">(only change this if it was different)</span></label>' +
@@ -284,6 +292,23 @@
         '<label class="lbl" for="f-note">Notes (optional)</label><textarea class="txt" id="f-note" placeholder="Leaving early, owes $5, etc.">' + esc(d.note) + '</textarea>' +
         (editing ? '<div class="btns" style="margin-top:16px"><button class="btn danger" id="delBtn">🗑 Delete this check-in</button></div>' : '') +
       '</div>';
+  }
+  function messCard(d) {
+    var fee = d.messFee != null && d.messFee !== '' ? d.messFee : '';
+    return '<div class="card mess" id="messCard"' + (CABINS[d.type] ? '' : ' hidden') + '><div class="step"><span class="num">🧹</span><h2>Cabin left messy?</h2></div>' +
+      '<p class="hint" style="font-size:1.05rem">Only if the cabin was left in bad shape. Snap photos as proof and add the cleaning fee.</p>' +
+      '<div class="btns"><button type="button" class="btn sun" id="messPhotoBtn">📸 Photo of the mess</button>' +
+        (d.id && ((d.messPhotos || []).length || num(fee)) ? '<button type="button" class="btn ghost" id="messPrint">🖨 Print proof for the file</button>' : '') + '</div>' +
+      '<div class="thumbs" id="messThumbs">' + thumbs(d.messPhotos) + '</div>' +
+      '<div class="row2"><div><label class="lbl" for="f-messfee">Cleaning fee to charge</label><div class="money"><input class="txt" id="f-messfee" inputmode="decimal" value="' + esc(fee) + '" placeholder="0.00"></div></div>' +
+      '<div><label class="lbl" for="f-messnote">What was wrong?</label><input class="txt" id="f-messnote" value="' + esc(d.messNote || '') + '" placeholder="Trash left, dirty floors, broken lamp…"></div></div>' +
+      '<div id="messPayWrap"' + (num(fee) ? '' : ' hidden') + '><div class="lbl">Has the fee been paid?</div><div class="choices pay" id="messPays">' +
+        [['', '⏳ Not yet']].concat(PAYS.map(function (p) { return [p.id, p.name]; })).map(function (p) {
+          return '<button type="button" class="choice ' + p[0] + ((d.messPaid || '') === p[0] ? ' on' : '') + '" data-messpay="' + p[0] + '">' + p[1] + '</button>';
+        }).join('') + '</div>' +
+        '<div id="messCheckWrap"' + (d.messPaid === 'check' ? '' : ' hidden') + '><label class="lbl" for="f-messcheck">Check number</label><input class="txt" id="f-messcheck" inputmode="numeric" value="' + esc(d.messCheckNo || '') + '"></div>' +
+        '<div id="messProofWrap"' + (d.messPaid === 'cash' || d.messPaid === 'check' ? '' : ' hidden') + '><button type="button" class="btn" id="messPayPhoto">📸 Photo of the payment</button><div class="thumbs" id="messPayThumbs">' + thumbs(d.messPayPhotos) + '</div></div>' +
+      '</div></div>';
   }
   function stepper(key, label, val, min) {
     return '<div class="stepper"><div class="sl">' + esc(label) + '</div><div class="ctl">' +
@@ -300,6 +325,12 @@
     d.donation = $('#f-donation').value.trim();
     d.checkNo = $('#f-checkno') ? $('#f-checkno').value.trim() : '';
     d.note = $('#f-note').value.trim();
+    if ($('#f-messfee')) {
+      var mf = $('#f-messfee').value.trim();
+      d.messFee = mf; d.messNote = $('#f-messnote').value.trim(); d.messCheckNo = $('#f-messcheck') ? $('#f-messcheck').value.trim() : '';
+      if (num(mf) && !d.messAt) d.messAt = nowStamp();
+      var mw = $('#messPayWrap'); if (mw) mw.hidden = !num(mf);
+    }
     var ov = $('#f-override').value.trim();
     d.amountOverride = ov === '' ? null : ov;
   }
@@ -323,6 +354,30 @@
     $('#barTotal').textContent = money(paid(d));
     $('#barPay').textContent = d.pay ? 'Paid by ' + d.pay : 'Pick how they paid (step 5)';
   }
+  function proofStamp(d, what) {
+    readForm();
+    return (db.settings.park || 'Campground') + ' · ' + what + ' · ' + nowStamp() + (d.name ? ' · ' + d.name : '') + (d.site ? ' · Site ' + d.site : '');
+  }
+  function checkOcr(data) {
+    var note = $('#ocrNote'); if (!note) return;
+    note.hidden = false; note.className = 'ocrnote'; note.textContent = '🔎 Reading the check… (you can keep going)';
+    readCheck(data).then(function (r) {
+      var n = $('#ocrNote'); if (!n) return;
+      var bits = [];
+      var cn = $('#f-checkno');
+      if (r.checkNo && cn && !cn.value.trim()) { cn.value = r.checkNo; bits.push('check #' + r.checkNo); }
+      var total = paid(state.draft);
+      if (r.amount != null) {
+        if (Math.abs(r.amount - total) < 0.005) bits.push('amount ' + money(r.amount) + ' ✓ matches the total');
+        else { n.innerHTML = (bits.length ? 'Filled in ' + esc(bits.join(', ')) + '. ' : '') + 'The check looks like <b>' + money(r.amount) + '</b> but the total is ' + money(total) + '. ' +
+          '<button type="button" class="btn ghost" id="ocrUse" data-amt="' + r.amount + '">Use ' + money(r.amount) + '</button>'; readForm(); return; }
+      }
+      readForm();
+      n.textContent = bits.length ? '✓ Filled in ' + bits.join(', ') + '. Please double-check.' : 'Could not read the check clearly — type the check number if you want it.';
+    }).catch(function () {
+      var n = $('#ocrNote'); if (n) n.textContent = 'Photo saved. (Reading the check needs internet — type the check number if you want it.)';
+    });
+  }
   function bindCheckin() {
     var bar = document.createElement('div');
     bar.className = 'savebar';
@@ -343,6 +398,7 @@
         d.type = b.dataset.type;
         if (was !== d.type) delete d.rate;   // a different kind of site → today's price
         app.querySelectorAll('[data-type]').forEach(function (x) { x.classList.toggle('on', x === b); });
+        $('#messCard').hidden = !CABINS[d.type];
         var cf = $('#f-cleaning'), cc = num(db.settings.cabinCleaning), usual = num(db.settings.cleaning);
         if (cc && CABINS[d.type] && !CABINS[was] && (cf.value.trim() === '' || num(cf.value) === usual)) cf.value = String(cc);
         else if (cc && !CABINS[d.type] && CABINS[was] && num(cf.value) === cc) cf.value = usual ? String(usual) : '';
@@ -354,9 +410,58 @@
         var k = b.dataset.step, min = num(b.dataset.min || 0);
         d[k] = Math.max(min, num(d[k]) + num(b.dataset.d));
         $('#v-' + k).textContent = d[k];
+      } else if (b.dataset.photo) {
+        var pid = b.dataset.photo;
+        viewPhoto(pid, function (id) {
+          ['payPhotos', 'messPhotos', 'messPayPhotos'].forEach(function (k) { if (d[k]) d[k] = d[k].filter(function (p) { return p.id !== id; }); });
+          b.remove(); toast('Photo deleted');
+        });
+        return;
+      } else if (b.dataset.proof) {
+        var kind = b.dataset.proof;
+        d.pay = kind; app.querySelectorAll('[data-pay]').forEach(function (x) { x.classList.toggle('on', x.dataset.pay === kind); });
+        $('#checkNoWrap').hidden = kind !== 'check'; b.classList.remove('pulse'); refreshTotal();
+        snapPhoto({ title: kind === 'check' ? 'Photo of the check' : 'Photo of the cash', frame: kind === 'check' ? 'check' : '',
+          hint: kind === 'check' ? 'Lay the check flat and fit it inside the box. Front side up.' : 'Spread the bills out on a table so each one shows.',
+          stamp: proofStamp(d, kind === 'check' ? 'Check' : 'Cash') }, function (data) {
+          savePhoto(data, 'pay-' + kind, d.id).then(function (p) {
+            (d.payPhotos = d.payPhotos || []).push(p);
+            $('#payThumbs').insertAdjacentHTML('beforeend', thumbs([p])); hydratePhotos($('#payThumbs'));
+            toast('📸 Saved · logged ' + p.at);
+            if (kind === 'check') checkOcr(data);
+          }).catch(function () { alertBox('Photo not saved', 'The tablet could not store the picture. Try again.'); });
+        });
+        return;
+      } else if (b.id === 'messPhotoBtn' || b.id === 'messPayPhoto') {
+        var pay = b.id === 'messPayPhoto';
+        snapPhoto({ title: pay ? 'Photo of the payment' : 'Photo of the mess', frame: '',
+          hint: pay ? 'Get the cash or check in the picture.' : 'Show what was left behind. Take as many pictures as you need.',
+          stamp: proofStamp(d, pay ? 'Cleaning fee paid' : 'Cabin condition') }, function (data) {
+          savePhoto(data, pay ? 'mess-pay' : 'mess', d.id).then(function (p) {
+            var key = pay ? 'messPayPhotos' : 'messPhotos', box = pay ? '#messPayThumbs' : '#messThumbs';
+            (d[key] = d[key] || []).push(p);
+            if (!pay && !d.messAt) d.messAt = p.at;
+            if (!pay && !$('#f-messfee').value.trim() && num(db.settings.cabinCleaning)) { $('#f-messfee').value = String(db.settings.cabinCleaning); readForm(); }
+            $(box).insertAdjacentHTML('beforeend', thumbs([p])); hydratePhotos($(box));
+            toast('📸 Saved · logged ' + p.at);
+          }).catch(function () { alertBox('Photo not saved', 'The tablet could not store the picture. Try again.'); });
+        });
+        return;
+      } else if (b.dataset.messpay != null) {
+        d.messPaid = b.dataset.messpay;
+        d.messPaidDate = d.messPaid ? (d.messPaidDate || todayIso()) : '';
+        app.querySelectorAll('[data-messpay]').forEach(function (x) { x.classList.toggle('on', x === b); });
+        $('#messCheckWrap').hidden = d.messPaid !== 'check';
+        $('#messProofWrap').hidden = !(d.messPaid === 'cash' || d.messPaid === 'check');
+        return;
+      } else if (b.id === 'messPrint') {
+        readForm(); printMess(d); return;
+      } else if (b.id === 'ocrUse') {
+        $('#f-override').value = b.dataset.amt; $('#ocrNote').hidden = true; toast('Amount set to ' + money(b.dataset.amt));
       } else if (b.id === 'delBtn') {
         confirmBox('Delete this check-in?', 'This removes ' + (d.name || 'this camper') + ' from the sheet. It cannot be undone.', 'Yes, delete it', function () {
           db.entries = db.entries.filter(function (e) { return e.id !== d.id; });
+          ['payPhotos', 'messPhotos', 'messPayPhotos'].forEach(function (k) { (d[k] || []).forEach(function (p) { photoDel(p.id).catch(function () {}); }); });
           save(); toast('Check-in deleted'); go('sheet', { date: d.date });
         }, true);
         return;
@@ -378,6 +483,7 @@
     });
     $('#cancelBtn').onclick = function () { go(state.draft.id ? 'sheet' : 'home'); };
     $('#saveBtn').onclick = saveEntry;
+    hydratePhotos(app);
     refreshTotal();
     $('#f-name').focus();
   }
@@ -397,10 +503,256 @@
     } else {
       rec.id = uid(); rec.createdAt = Date.now(); db.entries.push(rec);
     }
+    ['payPhotos', 'messPhotos', 'messPayPhotos'].forEach(function (k) {
+      (rec[k] || []).forEach(function (p) { photoGet(p.id).then(function (r) { if (r && r.entryId !== rec.id) { r.entryId = rec.id; photoPut(r); } }).catch(function () {}); });
+    });
     if (save()) {
       toast('✓ Saved ' + rec.name + ' — ' + money(rec.total));
       go('sheet', { date: rec.date });
     }
+  }
+
+  // ---------- Photo proof: payment photos + messy-cabin evidence ----------
+  // Photos live in IndexedDB (localStorage is far too small for pictures).
+  var PHOTO_DB = DEMO ? 'camphost_photos_demo' : 'camphost_photos';
+  function photoDb() {
+    if (!photoDb._p) photoDb._p = new Promise(function (res, rej) {
+      var r = indexedDB.open(PHOTO_DB, 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore('photos', { keyPath: 'id' }); };
+      r.onsuccess = function () { res(r.result); };
+      r.onerror = function () { photoDb._p = null; rej(r.error); };
+    });
+    return photoDb._p;
+  }
+  function photoTx(mode, fn) {
+    return photoDb().then(function (pdb) {
+      return new Promise(function (res, rej) {
+        var tx = pdb.transaction('photos', mode), st = tx.objectStore('photos'), out;
+        var r = fn(st); if (r) r.onsuccess = function () { out = r.result; };
+        tx.oncomplete = function () { res(out); }; tx.onerror = function () { rej(tx.error); };
+      });
+    });
+  }
+  function photoPut(rec) { return photoTx('readwrite', function (st) { return st.put(rec); }); }
+  function photoGet(id) { return photoTx('readonly', function (st) { return st.get(id); }); }
+  function photoDel(id) { return photoTx('readwrite', function (st) { return st.delete(id); }); }
+  function photoAll() { return photoTx('readonly', function (st) { return st.getAll(); }); }
+
+  function nowStamp() { var d = new Date(); return shortDate(iso(d)) + ' ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
+  function thumbs(list) {
+    return (list || []).map(function (p) {
+      return '<button type="button" class="thumb" data-photo="' + esc(p.id) + '" aria-label="Open photo"><img alt=""><span>' + esc(p.at || '') + '</span></button>';
+    }).join('');
+  }
+  function hydratePhotos(root) {
+    (root || document).querySelectorAll('[data-photo] img:not([src])').forEach(function (img) {
+      var id = img.parentNode.dataset.photo;
+      photoGet(id).then(function (p) { if (p) img.src = p.data; else img.parentNode.classList.add('gone'); }).catch(function () {});
+    });
+  }
+  // Shrink to a phone-sized JPEG and burn a proof stamp into the bottom of the picture.
+  function finishShot(src, w, h, stamp) {
+    var max = 1600, k = Math.min(1, max / Math.max(w, h));
+    var c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k);
+    var g = c.getContext('2d'); g.drawImage(src, 0, 0, c.width, c.height);
+    if (stamp) {
+      var fs = Math.max(16, Math.round(c.width / 45)), bar = fs * 1.9;
+      g.fillStyle = 'rgba(0,0,0,.62)'; g.fillRect(0, c.height - bar, c.width, bar);
+      g.fillStyle = '#fff'; g.font = 'bold ' + fs + 'px sans-serif'; g.textBaseline = 'middle';
+      g.fillText(stamp, fs * 0.6, c.height - bar / 2, c.width - fs * 1.2);
+    }
+    return c.toDataURL('image/jpeg', 0.72);
+  }
+  function snapPhoto(o, done) {
+    var m = modal('<h2>📸 ' + esc(o.title) + '</h2><p class="hint" style="font-size:1.05rem">' + esc(o.hint) + '</p>' +
+      '<div class="cam"><video id="camV" playsinline muted autoplay></video>' + (o.frame ? '<div class="camframe ' + o.frame + '"></div>' : '') +
+      '<img id="camShot" alt="" hidden><div class="camwait" id="camWait">Starting the camera…</div></div>' +
+      '<div class="btns" id="camBtns"></div><input type="file" accept="image/*" capture="environment" id="camFile" hidden>');
+    var v = $('#camV', m), shotImg = $('#camShot', m), btns = $('#camBtns', m), file = $('#camFile', m), wait = $('#camWait', m);
+    var stream = null, shot = null, useFile = false;
+    function stop() { if (stream) stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+    var guard = setInterval(function () { if ($('#modal').hidden || !document.body.contains(v)) { stop(); clearInterval(guard); } }, 800);
+    function live() {
+      shot = null; shotImg.hidden = true; v.hidden = useFile;
+      btns.innerHTML = '<button class="btn sun big" id="camSnap">📸 ' + (useFile ? 'Open Camera' : 'Take Picture') + '</button><button class="btn ghost big" id="camCancel">Cancel</button>';
+      $('#camSnap', m).onclick = function () {
+        if (useFile) return file.click();
+        if (!v.videoWidth) return toast('Camera is still starting…');
+        show(finishShot(v, v.videoWidth, v.videoHeight, o.stamp));
+      };
+      $('#camCancel', m).onclick = function () { stop(); closeModal(); };
+    }
+    function show(data) {
+      shot = data; shotImg.src = data; shotImg.hidden = false; v.hidden = true; wait.hidden = true;
+      btns.innerHTML = '<button class="btn sun big" id="camUse">✓ Use This Picture</button><button class="btn ghost big" id="camRetake">↺ Take It Again</button>';
+      $('#camUse', m).onclick = function () { stop(); closeModal(); done(shot); };
+      $('#camRetake', m).onclick = live;
+    }
+    file.onchange = function () {
+      var f = file.files[0]; if (!f) return;
+      var img = new Image(), url = URL.createObjectURL(f);
+      img.onload = function () { show(finishShot(img, img.naturalWidth, img.naturalHeight, o.stamp)); URL.revokeObjectURL(url); };
+      img.src = url; file.value = '';
+    };
+    live();
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
+        .then(function (s) { if ($('#modal').hidden) { s.getTracks().forEach(function (t) { t.stop(); }); return; } stream = s; v.srcObject = s; wait.hidden = true; })
+        .catch(function () { useFile = true; wait.textContent = 'Tap "Open Camera" to take the picture.'; live(); });
+    } else { useFile = true; wait.textContent = 'Tap "Open Camera" to take the picture.'; live(); }
+  }
+  function savePhoto(data, kind, entryId) {
+    var rec = { id: 'ph' + uid(), kind: kind, entryId: entryId || null, at: nowStamp(), takenAt: Date.now(), data: data };
+    return photoPut(rec).then(function () { return { id: rec.id, at: rec.at }; });
+  }
+  function viewPhoto(id, onDelete) {
+    var m = modal('<div class="bigphoto"><img alt="Proof photo"></div><div class="btns">' +
+      '<button class="btn big" data-close>Close</button>' + (onDelete ? '<button class="btn ghost danger" data-del>🗑 Delete photo</button>' : '') + '</div>');
+    photoGet(id).then(function (p) { if (p) $('.bigphoto img', m).src = p.data; });
+    $('[data-close]', m).onclick = closeModal;
+    if (onDelete) $('[data-del]', m).onclick = function () {
+      confirmBox('Delete this photo?', 'The photo will be gone for good.', 'Yes, delete it', function () { photoDel(id).catch(function () {}); onDelete(id); }, true);
+    };
+  }
+
+  // Reading a check: best effort, never trusted blindly — the host confirms.
+  var TESS_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+  function loadTess() {
+    if (window.Tesseract) return Promise.resolve(window.Tesseract);
+    if (!loadTess._p) loadTess._p = new Promise(function (res, rej) {
+      var s = document.createElement('script'); s.src = TESS_URL;
+      s.onload = function () { res(window.Tesseract); }; s.onerror = function () { loadTess._p = null; rej(new Error('offline')); };
+      document.head.appendChild(s);
+    });
+    return loadTess._p;
+  }
+  function parseCheck(text) {
+    var out = { checkNo: '', amount: null };
+    var lines = String(text || '').split(/\n+/).map(function (l) { return l.trim(); }).filter(Boolean);
+    var amts = [], m, re = /(\$\s*)?(\d{1,4}(?:,\d{3})?)\s*[.,]\s*(\d{2})(?!\d)/g;
+    lines.forEach(function (l) {
+      if (/\b(19|20)\d{2}\b/.test(l) && !/\$/.test(l)) return;   // skip date lines
+      re.lastIndex = 0;
+      while ((m = re.exec(l))) amts.push({ v: parseFloat(m[2].replace(/,/g, '') + '.' + m[3]), dollar: !!m[1] });
+    });
+    var pick = amts.filter(function (a) { return a.dollar; })[0] || amts.sort(function (a, b) { return b.v - a.v; })[0];
+    if (pick && pick.v > 0 && pick.v < 10000) out.amount = pick.v;
+    for (var i = 0; i < Math.min(4, lines.length); i++) {
+      var n = lines[i].match(/(?:^|\s|No\.?|#)(\d{3,5})\s*$/i);
+      if (n && !/date|\/|-/i.test(lines[i])) { out.checkNo = n[1]; break; }
+    }
+    return out;
+  }
+  function readCheck(data) {
+    return loadTess().then(function (T) { return T.recognize(data, 'eng'); }).then(function (r) { return parseCheck(r.data && r.data.text); });
+  }
+
+  // ---------- Messy-cabin fees ----------
+  function messOwed() { return db.entries.filter(function (e) { return num(e.messFee) > 0 && !e.messPaid; }); }
+  function messPaidWhere(pred) { return db.entries.filter(function (e) { return num(e.messFee) > 0 && e.messPaid && pred(e.messPaidDate || e.date); }); }
+  function messStatus(e) {
+    if (!num(e.messFee)) return '';
+    return '🧹 Messy-cabin fee ' + money(e.messFee) + ' · ' + (e.messPaid ? 'paid ' + e.messPaid + (e.messCheckNo ? ' #' + e.messCheckNo : '') : 'still owed');
+  }
+  function printMess(e) {
+    var all = (e.messPhotos || []).concat(e.messPayPhotos || []);
+    Promise.all(all.map(function (p) { return photoGet(p.id).catch(function () { return null; }); })).then(function (recs) {
+      var byId = {}; recs.forEach(function (r) { if (r) byId[r.id] = r; });
+      var pics = function (list, cap) {
+        return (list || []).map(function (p) { var r = byId[p.id]; return r ? '<figure><img src="' + r.data + '"><figcaption>' + esc(cap) + ' · ' + esc(p.at) + '</figcaption></figure>' : ''; }).join('');
+      };
+      var html = '<div class="ph"><h1>' + esc(db.settings.park) + ' — Cabin Cleaning Fee Record</h1><div>Printed ' + esc(nowStamp()) + '</div></div>' +
+        '<table class="kv"><tr><th>Camper</th><td>' + esc(e.name) + '</td><th>Cabin</th><td>' + esc(typeName(e.type)) + (e.site ? ' · Site ' + esc(e.site) : '') + '</td></tr>' +
+        '<tr><th>Stay</th><td>' + esc(niceDate(e.date)) + ' · ' + e.nights + ' night' + (e.nights == 1 ? '' : 's') + '</td><th>Found messy</th><td>' + esc(e.messAt || '') + '</td></tr>' +
+        '<tr><th>Cleaning fee</th><td>' + money(e.messFee) + '</td><th>Status</th><td>' + (e.messPaid ? 'Paid by ' + esc(e.messPaid) + (e.messCheckNo ? ' #' + esc(e.messCheckNo) : '') + (e.messPaidDate ? ' on ' + esc(shortDate(e.messPaidDate)) : '') : 'Still owed') + '</td></tr>' +
+        '<tr><th>What was wrong</th><td colspan="3">' + esc(e.messNote || '') + '</td></tr></table>' +
+        '<div class="pics">' + pics(e.messPhotos, 'Cabin condition') + pics(e.messPayPhotos, 'Payment') + '</div>' +
+        '<p style="margin-top:14px">Host signature: ______________________________</p>';
+      var ps = $('#printSheet'); if (!ps) { ps = document.createElement('div'); ps.id = 'printSheet'; document.body.appendChild(ps); }
+      ps.innerHTML = html;
+      setTimeout(function () { window.print(); }, 300);
+    });
+  }
+
+  // ---------- Fast check-in for returning campers ----------
+  function repeatCampers() {
+    var last = {};
+    db.entries.forEach(function (e) {
+      var k = (e.name || '').trim().toLowerCase(); if (!k) return;
+      if (!last[k] || (e.createdAt || 0) > (last[k].createdAt || 0)) last[k] = e;
+    });
+    return Object.keys(last).map(function (k) { return last[k]; }).sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+  }
+  function repeatDraft(prev) {
+    var d = blankEntry();
+    ['name', 'site', 'type', 'adults', 'kids', 'other', 'nights', 'wood'].forEach(function (k) { if (prev[k] != null) d[k] = prev[k]; });
+    d.date = todayIso(); d.wood = 0;
+    if (CABINS[d.type] && num(db.settings.cabinCleaning)) d.cleaning = String(db.settings.cabinCleaning);
+    return d;
+  }
+  function viewRepeat() {
+    var q = (state.rq || '').toLowerCase();
+    var list = repeatCampers().filter(function (e) { return !q || e.name.toLowerCase().indexOf(q) >= 0 || String(e.site) === q; });
+    var rows = list.slice(0, 40).map(function (e) {
+      var d = repeatDraft(e);
+      return '<button class="guest" data-repeat="' + esc(e.id) + '"><div class="site"><small>SITE</small>' + esc(e.site || '–') + '</div>' +
+        '<div class="main"><div class="nm">' + esc(e.name) + '</div><div class="meta">' + esc(typeName(e.type)) + ' · ' + d.nights + ' night' + (d.nights == 1 ? '' : 's') +
+        ' · last here ' + esc(shortDate(e.date)) + '</div></div><div class="amt">' + money(calc(d).total) + '<br><span class="tag">⚡ tap</span></div></button>';
+    }).join('') || '<div class="empty">' + (q ? 'Nobody by that name yet.' : 'No campers yet — check someone in once and they show up here next time.') + '</div>';
+    return '<h1>⚡ Repeat Camper</h1><p class="hint" style="font-size:1.1rem;margin-top:-4px">Tap the camper, then tap how they paid. Same site, people and nights as last time.</p>' +
+      '<input class="txt" id="rq" placeholder="Type a name or site number" value="' + esc(state.rq || '') + '" autocomplete="off">' +
+      '<div style="margin-top:14px" id="rlist">' + rows + '</div>';
+  }
+  function fastCheckin(prev) {
+    var d = repeatDraft(prev), c = calc(d);
+    var m = modal('<h2>Welcome back, ' + esc(prev.name.split(',').reverse().join(' ').trim()) + '!</h2>' +
+      '<p style="font-size:1.15rem">' + esc(typeName(d.type)) + (d.site ? ' · Site ' + esc(d.site) : '') + '<br>' +
+      d.nights + ' night' + (d.nights == 1 ? '' : 's') + ' · ' + d.adults + ' adult' + (d.adults == 1 ? '' : 's') + (num(d.kids) ? ', ' + d.kids + ' kid' + (d.kids == 1 ? '' : 's') : '') +
+      '<br><b style="font-size:1.6rem;color:var(--pine)">' + money(c.total) + '</b></p>' +
+      '<p class="lbl">How did they pay?</p><div class="choices pay">' + PAYS.map(function (p) { return '<button class="choice ' + p.id + '" data-fpay="' + p.id + '">' + p.name + '</button>'; }).join('') + '</div>' +
+      '<div class="btns" style="margin-top:16px"><button class="btn ghost big" data-fedit>✏️ Change something</button><button class="btn ghost" data-fno>Cancel</button></div>');
+    m.querySelectorAll('[data-fpay]').forEach(function (b) {
+      b.onclick = function () {
+        d.pay = b.dataset.fpay; closeModal();
+        var rec = saveDraftNow(d);
+        if (rec && (d.pay === 'cash' || d.pay === 'check')) offerProof(rec);
+      };
+    });
+    $('[data-fedit]', m).onclick = function () { closeModal(); state.draft = d; go('checkin'); toast('Filled in from their last visit'); };
+    $('[data-fno]', m).onclick = closeModal;
+  }
+  function saveDraftNow(d) {
+    var rec = JSON.parse(JSON.stringify(d));
+    rec.rate = rateOf(d); rec.woodRate = woodRateOf(d); rec.total = paid(rec);
+    rec.id = uid(); rec.createdAt = rec.updatedAt = Date.now(); db.entries.push(rec);
+    if (!save()) return null;
+    toast('✓ Checked in ' + rec.name + ' — ' + money(rec.total)); go('sheet', { date: rec.date });
+    return rec;
+  }
+  // After a fast check-in: one more tap to photograph the cash/check (optional).
+  function offerProof(rec) {
+    var kind = rec.pay;
+    var m = modal('<h2>✓ ' + esc(rec.name) + ' is checked in</h2><p style="font-size:1.15rem">Snap a photo of the ' + kind + ' for proof?</p>' +
+      '<div class="btns"><button class="btn sun big" data-yes>📸 Yes, take the photo</button><button class="btn ghost big" data-no>No thanks</button></div>');
+    $('[data-no]', m).onclick = closeModal;
+    $('[data-yes]', m).onclick = function () {
+      closeModal();
+      snapPhoto({ title: 'Photo of the ' + kind, frame: kind === 'check' ? 'check' : '',
+        hint: kind === 'check' ? 'Lay the check flat and fit it inside the box. Front side up.' : 'Spread the bills out on a table so each one shows.',
+        stamp: (db.settings.park || 'Campground') + ' · ' + (kind === 'check' ? 'Check' : 'Cash') + ' · ' + nowStamp() + ' · ' + rec.name + (rec.site ? ' · Site ' + rec.site : '') }, function (data) {
+        savePhoto(data, 'pay-' + kind, rec.id).then(function (p) {
+          var e = db.entries.filter(function (x) { return x.id === rec.id; })[0]; if (!e) return;
+          (e.payPhotos = e.payPhotos || []).push(p); save(); render(); toast('📸 Saved · logged ' + p.at);
+          if (kind !== 'check') return;
+          readCheck(data).then(function (r) {
+            var msg = [];
+            if (r.checkNo && !e.checkNo) { e.checkNo = r.checkNo; msg.push('check #' + r.checkNo); }
+            if (r.amount != null && Math.abs(r.amount - paid(e)) >= 0.005) msg.push('heads up: the check looks like ' + money(r.amount) + ', total is ' + money(paid(e)));
+            save(); render(); if (msg.length) toast(msg.join(' · '));
+          }).catch(function () {});
+        });
+      });
+    };
   }
 
   // ---------- Daily sheet ----------
@@ -423,8 +775,9 @@
         '<div class="main"><div class="nm">' + esc(e.name) + '</div>' +
         '<div class="meta">' + esc(typeName(e.type)) + ' · ' + e.nights + ' night' + (e.nights == 1 ? '' : 's') + (ppl.length ? ' · ' + ppl.join(', ') : '') +
         (num(e.wood) ? ' · ' + e.wood + ' wood' : '') + '</div>' +
-        (e.note ? '<div class="meta">📝 ' + esc(e.note) + '</div>' : '') + '</div>' +
-        '<div class="amt">' + money(paid(e)) + '<br><span class="tag ' + e.pay + '">' + esc(e.pay) + (e.checkNo ? ' #' + esc(e.checkNo) : '') + '</span></div>' +
+        (e.note ? '<div class="meta">📝 ' + esc(e.note) + '</div>' : '') +
+        (num(e.messFee) ? '<div class="meta messtag' + (e.messPaid ? '' : ' owed') + '">' + esc(messStatus(e)) + '</div>' : '') + '</div>' +
+        '<div class="amt">' + money(paid(e)) + '<br><span class="tag ' + e.pay + '">' + esc(e.pay) + (e.checkNo ? ' #' + esc(e.checkNo) : '') + ((e.payPhotos || []).length ? ' 📸' : '') + '</span></div>' +
         '</button>';
     }).join('') : '<div class="empty">Nobody checked in on this day yet.</div>';
     return '<h1>Daily Sheet</h1>' + dayNav() +
@@ -434,8 +787,9 @@
   }
 
   // ---------- Totals ----------
-  function summarize(list) {
-    var s = { byType: {}, wood: 0, woodQty: 0, cleaning: 0, donation: 0, grand: 0, cash: 0, check: 0, credit: 0, people: 0, adjust: 0 };
+  function summarize(list, mess) {
+    var s = { byType: {}, wood: 0, woodQty: 0, cleaning: 0, donation: 0, grand: 0, cash: 0, check: 0, credit: 0, people: 0, adjust: 0, mess: 0 };
+    (mess || []).forEach(function (e) { var f = num(e.messFee); s.mess += f; s.grand += f; if (s[e.messPaid] != null) s[e.messPaid] += f; });
     SITE_TYPES.forEach(function (t) { s.byType[t.id] = { nights: 0, amt: 0 }; });
     list.forEach(function (e) {
       var c = calc(e), p = paid(e);
@@ -456,6 +810,7 @@
     rows += '<tr><td>Wood</td><td class="r">' + s.woodQty + '</td><td class="r">' + money(s.wood) + '</td></tr>';
     rows += '<tr><td>Cleaning</td><td></td><td class="r">' + money(s.cleaning) + '</td></tr>';
     rows += '<tr><td>Donations</td><td></td><td class="r">' + money(s.donation) + '</td></tr>';
+    if (s.mess) rows += '<tr><td>Messy-cabin fees collected</td><td></td><td class="r">' + money(s.mess) + '</td></tr>';
     if (Math.abs(s.adjust) > 0.004) rows += '<tr><td>Price changes (paid different)</td><td></td><td class="r">' + money(s.adjust) + '</td></tr>';
     rows += '<tr class="grand"><td>Grand Total</td><td></td><td class="r">' + money(s.grand) + '</td></tr>';
     return '<table class="tot-table"><thead><tr><th>What</th><th class="r">Nights / Qty</th><th class="r">Amount</th></tr></thead><tbody>' + rows + '</tbody></table>';
@@ -463,7 +818,7 @@
   function viewTotals() {
     var month = state.totalsMode === 'month';
     var list = month ? entriesForMonth(state.date.slice(0, 7)) : entriesFor(state.date);
-    var s = summarize(list);
+    var s = summarize(list, messPaidWhere(function (dt) { return month ? dt.slice(0, 7) === state.date.slice(0, 7) : dt === state.date; }));
     var seg = '<div class="seg"><button data-mode="day" class="' + (month ? '' : 'on') + '">One Day</button><button data-mode="month" class="' + (month ? 'on' : '') + '">Whole Month</button></div>';
     var head;
     if (month) {
@@ -491,7 +846,7 @@
   }
   function updateOS() {
     var inp = $('#counted'); if (!inp) return;
-    var s = summarize(entriesFor(state.date)), deposit = s.cash + s.check, out = $('#osOut');
+    var s = summarize(entriesFor(state.date), messPaidWhere(function (dt) { return dt === state.date; })), deposit = s.cash + s.check, out = $('#osOut');
     var v = inp.value.trim();
     db.days[state.date] = Object.assign({}, db.days[state.date] || {}, { counted: v === '' ? null : v });
     save();
@@ -928,7 +1283,7 @@
   function printSheet(mode) {
     var month = mode === 'month';
     var list = month ? entriesForMonth(state.date.slice(0, 7)).sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; }) : entriesFor(state.date);
-    var s = summarize(list);
+    var s = summarize(list, messPaidWhere(function (dt) { return month ? dt.slice(0, 7) === state.date.slice(0, 7) : dt === state.date; }));
     var title = month ? parseIso(state.date).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : niceDate(state.date);
     var rows = list.map(function (e) {
       var p = paid(e), c = calc(e);
@@ -947,6 +1302,7 @@
       '<table><thead><tr><th>Date</th><th>Name</th><th>Adults</th><th>Kids</th><th>Other</th><th>Space</th><th>Nights</th><th>Cash</th><th>Check</th><th>Credit</th><th>Cleaning</th><th>Donation</th><th>Wood</th></tr></thead><tbody>' + rows + '</tbody></table>' +
       '<div class="sum"><table>' + typeRows + '</table>' +
       '<table><tr><td>Cleaning</td><td class="r">' + money(s.cleaning) + '</td></tr><tr><td>Donations</td><td class="r">' + money(s.donation) + '</td></tr>' +
+      (s.mess ? '<tr><td>Messy-cabin fees</td><td class="r">' + money(s.mess) + '</td></tr>' : '') +
       (Math.abs(s.adjust) > 0.004 ? '<tr><td>Price changes</td><td class="r">' + money(s.adjust) + '</td></tr>' : '') +
       '<tr><td><b>Grand Total</b></td><td class="r"><b>' + money(s.grand) + '</b></td></tr></table>' +
       '<table><tr><td>Cash</td><td class="r">' + money(s.cash) + '</td></tr><tr><td>Checks</td><td class="r">' + money(s.check) + '</td></tr><tr><td>Credit</td><td class="r">' + money(s.credit) + '</td></tr>' +
@@ -964,7 +1320,8 @@
     app.oninput = null;
     app.onclick = function (ev) {
       var b = ev.target.closest('button'); if (!b) return;
-      if (b.dataset.go) return go(b.dataset.go);
+      if (b.dataset.go) { if (b.dataset.go === 'repeat') state.rq = ''; return go(b.dataset.go); }
+      if (b.dataset.repeat) { var pv = db.entries.filter(function (x) { return x.id === b.dataset.repeat; })[0]; if (pv) fastCheckin(pv); return; }
       if (b.hasAttribute('data-new')) { state.draft = blankEntry(); if (state.view === 'home') state.draft.date = todayIso(); return go('checkin'); }
       if (b.dataset.edit) {
         var e = db.entries.filter(function (x) { return x.id === b.dataset.edit; })[0];
@@ -1006,14 +1363,24 @@
       if (b.id === 'keepPrices') { db.settings.priceListSeen = PARK_PRICES.version; db.settings.pricesConfirmed = true; save(); toast('OK — kept your prices'); return render(); }
       if (b.id === 'backupBtn') {
         db.settings.lastBackup = Date.now(); save();
-        download('campground-backup-' + todayIso() + '.json', JSON.stringify(db, null, 1), 'application/json');
-        toast('Backup saved to Downloads'); return render();
+        photoAll().catch(function () { return []; }).then(function (ph) {
+          download('campground-backup-' + todayIso() + '.json', JSON.stringify(Object.assign({}, db, { photos: ph || [] }), null, 1), 'application/json');
+          toast('Backup saved to Downloads' + (ph && ph.length ? ' (with ' + ph.length + ' photo' + (ph.length === 1 ? '' : 's') + ')' : '')); render();
+        });
+        return;
       }
       if (b.id === 'csvBtn') { download('campground-checkins-' + todayIso() + '.csv', csv(), 'text/csv'); return toast('Spreadsheet saved to Downloads'); }
       if (b.id === 'restoreBtn') return $('#restoreFile').click();
     };
     if ($('.prices')) $('#app').onchange = function (ev) { if (ev.target.id && ev.target.id.indexOf('p-') === 0) { savePriceForm(); toast('✓ Saved'); } };
     else $('#app').onchange = null;
+    var rq = $('#rq');
+    if (rq) rq.oninput = function () {
+      state.rq = rq.value; var keep = rq.selectionStart;
+      $('#rlist').innerHTML = (new DOMParser().parseFromString(viewRepeat(), 'text/html')).getElementById('rlist').innerHTML;
+      rq.setSelectionRange(keep, keep);
+    };
+    hydratePhotos($('#app'));
     var q = $('#q');
     if (q) { q.oninput = function () { state.q = q.value; $('#results').innerHTML = findResults(q.value); }; q.focus(); var v = q.value; q.value = ''; q.value = v; }
     var c = $('#counted');
@@ -1032,6 +1399,7 @@
           db.days = Object.assign({}, data.days || {}, db.days);
           if (Array.isArray(data.feedback)) { var fbId = {}; db.feedback.forEach(function (x) { fbId[x.id] = x; }); data.feedback.forEach(function (x) { if (x && x.id) fbId[x.id] = x; }); db.feedback = Object.keys(fbId).map(function (k) { return fbId[k]; }); }
           if (data.settings) { db.settings = Object.assign({}, db.settings, data.settings); db.settings.prices = Object.assign({}, DEFAULTS.settings.prices, data.settings.prices || {}); }
+          if (Array.isArray(data.photos)) data.photos.forEach(function (p) { if (p && p.id && p.data) photoPut(p).catch(function () {}); });
           lockRates(); save(); toast('✓ Backup restored'); render();
         });
       };
@@ -1048,5 +1416,5 @@
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
   }
-  window.__camp = { db: function () { return db; }, state: state, go: go, calc: calc, summarize: summarize };
+  window.__camp = { db: function () { return db; }, state: state, go: go, calc: calc, summarize: summarize, photos: photoAll, parseCheck: parseCheck, readCheck: readCheck };
 })();
