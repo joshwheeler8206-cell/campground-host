@@ -804,6 +804,8 @@
   ['pointerdown', 'keydown'].forEach(function (e) { document.addEventListener(e, idleReset, true); });
 
   function openExternal(url, pkg) {
+    // the Samsung home screen has no app-drawer launch intent; the kiosk app opens it directly
+    if (pkg === 'com.sec.android.app.launcher' && window.AndroidKiosk) { try { window.AndroidKiosk.exitKiosk(); return; } catch (e) {} }
     if (window.AndroidKiosk) { try { if (pkg ? window.AndroidKiosk.openApp(pkg, url || '') : window.AndroidKiosk.openUrl(url)) return; } catch (e) {} }
     if (url) window.open(url, '_blank');
   }
