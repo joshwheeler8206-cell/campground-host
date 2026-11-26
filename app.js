@@ -5,6 +5,7 @@
 
   var DEMO = /[?&]demo\b/.test(location.search);
   var KEY = DEMO ? 'camphost_demo' : 'camphost_v1';
+  var KIOSK = /[?&]kiosk\b/.test(location.search) || !!window.AndroidKiosk;
   var SITE_TYPES = [
     { id: 'full',   name: 'Full Hookup',           desc: 'Water, electric & sewer' },
     { id: 'ew',     name: 'Electric + Water Only', desc: 'No sewer' },
@@ -32,7 +33,8 @@
       park: 'Waubonsie Trail Park',
       prices: { full: 25, ew: 20, rustic: 10, ada: 80, tent: 10 },
       wood: 5, cleaning: 0, cabinCleaning: 0, pricesConfirmed: false,
-      priceListSeen: '', pricesChangedAt: null
+      priceListSeen: '', pricesChangedAt: null,
+      mode: 'host', pin: '2193'
     },
     entries: [],
     days: {},
@@ -50,6 +52,7 @@
     if (!db.days || typeof db.days !== 'object') db.days = {};
     if (!Array.isArray(db.feedback)) db.feedback = [];
     if (DEMO && !db.seeded) seedDemo();
+    if (KIOSK && !db.settings.kioskInit) { db.settings.kioskInit = true; db.settings.mode = 'cantril'; }
     lockRates();
   }
   // Every check-in remembers the price it was charged, so changing prices later
@@ -150,17 +153,21 @@
     render(); window.scrollTo(0, 0);
   }
   window.addEventListener('popstate', function () {
+    if (state.view === 'pin') return;
     // a camper holding the tablet should not be able to back out into the book
     if (state.view === 'fbthanks' || (state.view === 'fbform' && state.fb && state.fb.by === 'camper')) { try { history.pushState({ v: state.view }, ''); } catch (e) {} return; }
-    if (state.view !== 'home') { state.view = 'home'; render(); }
+    var mh = modeHome(); if (state.view !== mh) { state.view = mh; render(); }
   });
-  $('#homeBtn').onclick = function () { go('home'); };
+  function modeHome() { var m = db.settings.mode; return m === 'cantril' ? 'cantril' : m === 'personal' ? 'personal' : 'home'; }
+  $('#homeBtn').onclick = function () { go(modeHome()); };
 
   function render() {
     $('#parkName').textContent = db.settings.park || 'Campground';
     document.title = (db.settings.park || 'Campground') + ' · Host Book';
     var camperMode = (state.view === 'fbform' && state.fb && state.fb.by === 'camper') || state.view === 'fbthanks';
-    $('#homeBtn').hidden = state.view === 'home' || camperMode;
+    $('#homeBtn').hidden = state.view === modeHome() || camperMode;
+    document.body.dataset.mode = db.settings.mode;
+    $('.sub').textContent = db.settings.mode === 'cantril' ? 'Cantril, Iowa' : db.settings.mode === 'personal' ? 'Home' : 'Campground Host Book';
     document.body.classList.toggle('camper-mode', camperMode);
     var old = $('.savebar'); if (old) old.remove();
     var app = $('#app');
@@ -177,6 +184,12 @@
       };
     }
     if (state.view === 'home') app.innerHTML = viewHome();
+    else if (state.view === 'cantril') app.innerHTML = viewCantril();
+    else if (state.view === 'todo') app.innerHTML = viewTodo();
+    else if (state.view === 'park') app.innerHTML = viewPark();
+    else if (state.view === 'help') app.innerHTML = viewHelp();
+    else if (state.view === 'personal') app.innerHTML = viewPersonal();
+    else if (state.view === 'dev') app.innerHTML = viewDev();
     else if (state.view === 'checkin') { app.onchange = null; app.innerHTML = viewCheckin(); bindCheckin(); return; }
     else if (state.view === 'sheet') app.innerHTML = viewSheet();
     else if (state.view === 'totals') app.innerHTML = viewTotals();
@@ -539,6 +552,9 @@
       '<p class="hint">New prices are used for <b>new</b> check-ins. Old check-ins keep the price they were charged.' +
         (s.pricesChangedAt ? ' Prices last changed ' + esc(new Date(s.pricesChangedAt).toLocaleDateString()) + '.' : '') + '</p>' +
       '<div class="btns" style="margin-top:12px"><button class="btn big" id="savePrices">✓ Save Prices</button></div></div>' +
+      '<div class="card"><h2>Tablet modes &amp; PIN</h2><p style="font-size:1.05rem"><b>Cantril Mode</b> is the welcome screen for campers. <b>Personal Mode</b> is your own home screen. The PIN switches from Cantril Mode back to yours.</p>' +
+        '<label class="lbl" for="p-pin">PIN (4 numbers)</label><input class="txt" id="p-pin" inputmode="numeric" maxlength="4" value="' + esc(s.pin || '2193') + '" style="max-width:200px">' +
+        '<div class="btns" style="margin-top:12px"><button class="btn sun big" data-setmode="cantril">🏞️ Start Cantril Mode</button><button class="btn ghost" data-setmode="personal">🏠 Personal Mode</button></div></div>' +
       (DEMO ? '' : '<div class="card"><h2>Practice</h2><p style="font-size:1.1rem">Want to try things out first? Practice Mode has pretend campers. It never touches the real book.</p><div class="btns"><a class="btn sun big" href="./?demo">🎓 Open Practice Mode</a></div></div>') +
       '<div class="card"><h2>Backup copy</h2><p style="font-size:1.1rem">Everything is kept on this device only. Once a week, tap <b>Save a Backup</b> — it puts a file in your Downloads folder. If the tablet ever breaks, that file brings everything back.</p>' +
         '<div class="btns"><button class="btn sun big" id="backupBtn">💾 Save a Backup</button><button class="btn ghost" id="csvBtn">📊 Spreadsheet (CSV)</button><button class="btn ghost" id="restoreBtn">📂 Restore from Backup</button></div>' +
@@ -551,6 +567,7 @@
     s.wood = Math.max(0, num($('#p-wood').value)); s.cleaning = Math.max(0, num($('#p-cleaning').value));
     s.cabinCleaning = Math.max(0, num($('#p-cabinCleaning').value));
     s.park = $('#p-park').value.trim() || 'Campground';
+    var pin = ($('#p-pin') && $('#p-pin').value || '').replace(/\D/g, ''); if (pin.length === 4) s.pin = pin;
     if (JSON.stringify([s.prices, s.wood]) !== before) markPricesChanged();
     s.pricesConfirmed = true;
     save();
@@ -673,10 +690,11 @@
       }
     };
     $('#fbCancel').onclick = function () {
-      if (!camper) return go('feedback');
+      if (!camper) return go(db.settings.mode === 'cantril' ? 'cantril' : 'feedback');
       var has = f.stars || f.likes.length || f.needs.length || $('#fb-comment').value.trim();
-      if (!has) return go('feedback');
-      confirmBox('Go back without saving?', 'What the camper filled in will not be kept.', 'Yes, go back', function () { go('feedback'); }, true);
+      var back = db.settings.mode === 'cantril' ? 'cantril' : 'feedback';
+      if (!has) return go(back);
+      confirmBox('Go back without saving?', 'What the camper filled in will not be kept.', 'Yes, go back', function () { go(back); }, true);
     };
     $('#fbSave').onclick = function () { readFb(); saveFb(false); };
   }
@@ -692,6 +710,7 @@
     if (!save()) return;
     if (stay) { state.fb = rec; toast(rec.handled ? '✓ Marked handled' : 'Marked not handled'); return render(); }
     if (rec.by === 'camper' && !f.id) return go('fbthanks');
+    if (db.settings.mode === 'cantril') { toast('✓ Feedback saved'); return go('cantril'); }
     toast('✓ Feedback saved'); go('feedback');
   }
   function viewFbThanks() {
@@ -702,8 +721,9 @@
   }
   function bindFbThanks() {
     $('#fbAnother').onclick = function () { state.fb = blankFb('camper'); go('fbform'); };
+    if (db.settings.mode === 'cantril') { setTimeout(function () { if (state.view === 'fbthanks') go('cantril'); }, 20000); }
     var hb = $('#fbHostBack'), t = null;
-    var start = function (ev) { ev.preventDefault(); hb.classList.add('holding'); t = setTimeout(function () { go('feedback'); }, 1200); };
+    var start = function (ev) { ev.preventDefault(); hb.classList.add('holding'); t = setTimeout(function () { go(db.settings.mode === 'cantril' ? 'cantril' : 'feedback'); }, 1200); };
     var stop = function () { hb.classList.remove('holding'); clearTimeout(t); };
     hb.addEventListener('pointerdown', start); ['pointerup', 'pointerleave', 'pointercancel'].forEach(function (e) { hb.addEventListener(e, stop); });
   }
@@ -731,6 +751,176 @@
     ps.innerHTML = html;
     window.print();
   }
+
+
+  // ---------- Modes: Cantril (public kiosk) / Personal (the hosts) / Host Book ----------
+  var CANTRIL = { lat: 40.6436, lon: -92.0699 };
+  var WX = { 0: ['☀️', 'Clear'], 1: ['🌤️', 'Mostly clear'], 2: ['⛅', 'Partly cloudy'], 3: ['☁️', 'Cloudy'], 45: ['🌫️', 'Fog'], 48: ['🌫️', 'Fog'],
+    51: ['🌦️', 'Light drizzle'], 53: ['🌦️', 'Drizzle'], 55: ['🌧️', 'Drizzle'], 56: ['🌧️', 'Freezing drizzle'], 57: ['🌧️', 'Freezing drizzle'],
+    61: ['🌦️', 'Light rain'], 63: ['🌧️', 'Rain'], 65: ['🌧️', 'Heavy rain'], 66: ['🌧️', 'Freezing rain'], 67: ['🌧️', 'Freezing rain'],
+    71: ['🌨️', 'Light snow'], 73: ['🌨️', 'Snow'], 75: ['❄️', 'Heavy snow'], 77: ['🌨️', 'Snow'], 80: ['🌦️', 'Showers'], 81: ['🌧️', 'Showers'], 82: ['⛈️', 'Heavy showers'],
+    85: ['🌨️', 'Snow showers'], 86: ['❄️', 'Snow showers'], 95: ['⛈️', 'Thunderstorms'], 96: ['⛈️', 'Storms & hail'], 99: ['⛈️', 'Storms & hail'] };
+  function wxCached() { try { return JSON.parse(localStorage.getItem('camphost_wx')); } catch (e) { return null; } }
+  function loadWeather() {
+    var c = wxCached();
+    if (c && Date.now() - c.at < 20 * 60000) return;
+    if (!navigator.onLine) return;
+    var u = 'https://api.open-meteo.com/v1/forecast?latitude=' + CANTRIL.lat + '&longitude=' + CANTRIL.lon +
+      '&current=temperature_2m,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max' +
+      '&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=America%2FChicago&forecast_days=4';
+    fetch(u).then(function (r) { return r.json(); }).then(function (j) {
+      localStorage.setItem('camphost_wx', JSON.stringify({ at: Date.now(), j: j }));
+      if (state.view === 'cantril' || state.view === 'personal') render();
+    }).catch(function () {});
+  }
+  function weatherCard() {
+    var c = wxCached();
+    if (!c) return '<div class="wxcard"><div class="wxnow"><span class="wxico">🌤️</span><div><div class="wxt">Weather</div><div class="wxd">Shows up when the tablet is on Wi-Fi</div></div></div></div>';
+    var j = c.j, cur = j.current, d = j.daily, w = WX[cur.weather_code] || ['🌡️', ''];
+    var days = d.time.slice(0, 4).map(function (t, i) {
+      var ww = WX[d.weather_code[i]] || ['🌡️', ''];
+      return '<div class="wxday"><div class="dn">' + (i === 0 ? 'Today' : parseIso(t).toLocaleDateString(undefined, { weekday: 'short' })) + '</div><div class="di">' + ww[0] + '</div>' +
+        '<div class="dt"><b>' + Math.round(d.temperature_2m_max[i]) + '°</b> ' + Math.round(d.temperature_2m_min[i]) + '°</div>' +
+        (d.precipitation_probability_max[i] >= 30 ? '<div class="dp">💧 ' + d.precipitation_probability_max[i] + '%</div>' : '') + '</div>';
+    }).join('');
+    var age = Math.round((Date.now() - c.at) / 60000);
+    return '<div class="wxcard"><div class="wxnow"><span class="wxico">' + w[0] + '</span><div><div class="wxt">' + Math.round(cur.temperature_2m) + '°</div>' +
+      '<div class="wxd">' + esc(w[1]) + ' · wind ' + Math.round(cur.wind_speed_10m) + ' mph</div><div class="wxa">Cantril' + (age > 60 ? ' · updated ' + Math.round(age / 60) + ' h ago' : '') + '</div></div></div>' +
+      '<div class="wxdays">' + days + '</div></div>';
+  }
+  function clockLine() {
+    var n = new Date();
+    return '<div class="bigclock"><div class="tm" id="bigTime">' + n.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) + '</div><div class="dt">' + esc(niceDate(todayIso())) + '</div></div>';
+  }
+  setInterval(function () { var t = $('#bigTime'); if (t) t.textContent = new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }, 15000);
+  setInterval(function () { if (state.view === 'cantril' || state.view === 'personal') loadWeather(); }, 10 * 60000);
+  // kiosk idle: after 3 minutes untouched in Cantril mode, go back to the welcome screen
+  var idleT = null;
+  function idleReset() {
+    clearTimeout(idleT);
+    if (db.settings.mode !== 'cantril') return;
+    idleT = setTimeout(function () { closeModal(); if (state.view !== 'cantril' && state.view !== 'fbform') go('cantril'); }, 180000);
+  }
+  ['pointerdown', 'keydown'].forEach(function (e) { document.addEventListener(e, idleReset, true); });
+
+  function openExternal(url, pkg) {
+    if (window.AndroidKiosk) { try { if (pkg ? window.AndroidKiosk.openApp(pkg, url || '') : window.AndroidKiosk.openUrl(url)) return; } catch (e) {} }
+    if (url) window.open(url, '_blank');
+  }
+
+  var TODO_PARK = [
+    ['🎣', 'Fishing', 'Bring your pole. Ask the hosts where they\'re biting.'],
+    ['🥏', 'Disc golf', 'Free to play. Bring your own discs.'],
+    ['🧺', 'Picnics & walks', '23 acres of park to stretch your legs.'],
+    ['🔥', 'Campfires', 'Firewood bundles are sold by the hosts.']
+  ];
+  var TODO_NEAR = [
+    ['🛒', 'Dutchman\'s Store', 'Amish general store right in Cantril: bulk foods, baking, hardware.'],
+    ['🏞️', 'Lacey-Keosauqua State Park', 'Hiking, the Des Moines River and a swimming beach. About 15 minutes.'],
+    ['🚣', 'Lake Sugema', 'Big fishing lake with trails, near Keosauqua.'],
+    ['🏘️', 'Villages of Van Buren', 'Keosauqua, Bentonsport, Bonaparte and more: old river towns, shops and history.'],
+    ['🏨', 'Hotel Manning, Keosauqua', 'Historic 1800s riverboat-style hotel on the river.']
+  ];
+  function viewCantril() {
+    loadWeather();
+    return '<div class="khero"><div><h1>Welcome to ' + esc(db.settings.park) + '!</h1><p>Cantril, Iowa · cared for by the Cantril Grass Roots Corporation</p></div>' + clockLine() + '</div>' +
+      weatherCard() +
+      '<div class="big-grid kgrid">' +
+        '<button class="tile primary" data-go="todo"><span class="ico">🗺️</span><span class="t">Things to Do</span><span class="d">In the park and around Van Buren County</span></button>' +
+        '<button class="tile" data-go="park"><span class="ico">🏕️</span><span class="t">Park Info &amp; Prices</span><span class="d">Sites, cabins and how to pay</span></button>' +
+        '<button class="tile camper" data-fbnew="camper"><span class="ico">💬</span><span class="t">How Are We Doing?</span><span class="d">Tell the hosts about your stay</span></button>' +
+        '<button class="tile" data-go="help"><span class="ico">🆘</span><span class="t">Help &amp; Emergency</span><span class="d">Phone numbers and the nearest hospital</span></button>' +
+      '</div>' +
+      '<div class="kfoot"><button class="btn ghost" data-pin="host">🔒 Hosts</button></div>';
+  }
+  function todoList(arr) { return arr.map(function (x) { return '<div class="todo"><span class="ico">' + x[0] + '</span><div><div class="t">' + esc(x[1]) + '</div><div class="d">' + esc(x[2]) + '</div></div></div>'; }).join(''); }
+  function viewTodo() {
+    return '<h1>Things to Do</h1>' +
+      '<div class="card"><h2>Right here in the park</h2><div class="todos">' + todoList(TODO_PARK) + '</div></div>' +
+      '<div class="card"><h2>Nearby</h2><div class="todos">' + todoList(TODO_NEAR) + '</div><p class="hint">Hours change with the seasons. Call ahead or ask the hosts.</p>' +
+      '<div class="btns"><button class="btn sun big" data-ext="https://villagesofvanburen.com/events/">📅 See events in Van Buren County</button></div></div>';
+  }
+  function viewPark() {
+    var s = db.settings;
+    var rows = SITE_TYPES.map(function (t) { return '<tr><td>' + esc(t.name) + '<br><small class="hint">' + esc(t.desc) + '</small></td><td class="r"><b>' + money(s.prices[t.id]) + '</b> a night</td></tr>'; }).join('') +
+      '<tr><td>Firewood</td><td class="r"><b>' + money(s.wood) + '</b> a bundle</td></tr>';
+    return '<h1>Park Info &amp; Prices</h1>' +
+      '<div class="card"><h2>Nightly prices</h2><table class="breakdown kprices">' + rows + '</table>' +
+      '<p style="font-size:1.1rem">Pay the campground hosts with cash, check or card. The hosts will write you into the book.</p></div>' +
+      '<div class="card"><h2>Cabins</h2><p style="font-size:1.15rem">The rustic cabin and the accessible (ADA) cabin are rented by reservation.<br>Call <b>319-397-2193</b>.</p></div>';
+  }
+  function viewHelp() {
+    return '<h1>Help &amp; Emergency</h1>' +
+      '<div class="card emerg"><div class="n911">911</div><p style="font-size:1.3rem;margin:0">For a fire, crime or medical emergency, call <b>911</b>.<br>Tell them: <b>' + esc(db.settings.park) + ', Cantril, Iowa</b>.</p></div>' +
+      '<div class="card"><h2>Nearest hospital</h2><p style="font-size:1.2rem">Van Buren County Hospital<br>Keosauqua, Iowa (about 15 minutes)</p></div>' +
+      '<div class="card"><h2>Campground &amp; cabins</h2><p style="font-size:1.2rem">Reservations and questions: <b>319-397-2193</b><br>Or find the campground hosts in the park.</p></div>';
+  }
+  function viewPersonal() {
+    loadWeather();
+    var tile = function (ico, t, d, attrs, cls) { return '<button class="tile ' + (cls || '') + '" ' + attrs + '><span class="ico">' + ico + '</span><span class="t">' + t + '</span><span class="d">' + d + '</span></button>'; };
+    var h = new Date().getHours(), greet = h < 12 ? 'Good morning!' : h < 17 ? 'Good afternoon!' : 'Good evening!';
+    return '<div class="khero personal"><div><h1>' + greet + '</h1><p>Here\'s your day.</p></div>' + clockLine() + '</div>' + weatherCard() +
+      '<div class="big-grid pgrid">' +
+        tile('📧', 'Email', 'Read and send email', 'data-app="com.google.android.gm" data-url="https://mail.google.com"') +
+        tile('💬', 'Messenger', 'Message and video call family', 'data-app="com.facebook.orca" data-url="https://www.messenger.com"') +
+        tile('👍', 'Facebook', 'See what everyone\'s up to', 'data-app="com.facebook.katana" data-url="https://m.facebook.com"') +
+        tile('🖼️', 'Photos', 'Your pictures', 'data-app="com.sec.android.gallery3d"') +
+        tile('📷', 'Camera', 'Take a picture', 'data-app="com.sec.android.app.camera"') +
+        tile('🗺️', 'Things to Do', 'Around Cantril and Van Buren County', 'data-go="todo"') +
+        tile('📅', 'Events Nearby', 'What\'s happening this week', 'data-ext="https://villagesofvanburen.com/events/"') +
+        tile('🌐', 'Internet', 'Look something up', 'data-app="com.android.chrome" data-url="https://www.google.com"') +
+        tile('📒', 'Host Book', 'Check-ins, totals and feedback', 'data-go="home"', 'primary') +
+      '</div>' +
+      '<div class="card" style="margin-top:18px"><h2>Tablet</h2><div class="btns">' +
+        '<button class="btn sun big" data-setmode="cantril">🏞️ Back to Cantril Mode</button>' +
+        '<button class="btn ghost" data-app="com.android.settings">⚙️ Tablet settings</button>' +
+        '<button class="btn ghost" data-app="com.sec.android.app.launcher">📱 Regular tablet screen</button>' +
+      '</div><p class="hint">Cantril Mode is the welcome screen for campers. Your PIN gets you back here.</p></div>';
+  }
+  function askPin(onOk) {
+    var entered = '';
+    var m = modal('<h2>Enter your PIN</h2><div class="pindots" id="pinDots"></div><div class="pinpad">' +
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 'C', 0, '⌫'].map(function (k) { return '<button class="pk" data-k="' + k + '">' + k + '</button>'; }).join('') +
+      '</div><div class="btns" style="justify-content:center"><button class="btn ghost" data-no>Cancel</button></div>');
+    var dots = function () { $('#pinDots').innerHTML = [0, 1, 2, 3].map(function (i) { return '<span class="' + (i < entered.length ? 'on' : '') + '"></span>'; }).join(''); };
+    dots();
+    m.onclick = function (ev) {
+      var b = ev.target.closest('button'); if (!b) return;
+      if (b.hasAttribute('data-no')) { m.onclick = null; return closeModal(); }
+      var k = b.dataset.k; if (k == null) return;
+      if (k === 'C') entered = ''; else if (k === '⌫') entered = entered.slice(0, -1); else if (entered.length < 4) entered += k;
+      dots();
+      if (entered.length === 4) {
+        var dev = false; try { dev = !!(window.AndroidKiosk && window.AndroidKiosk.checkDev(entered)); } catch (e) {}
+        if (dev) { m.onclick = null; closeModal(); go('dev'); }
+        else if (entered === String(db.settings.pin || '2193')) { m.onclick = null; closeModal(); onOk(); }
+        else { $('#pinDots').classList.add('bad'); setTimeout(function () { entered = ''; var d = $('#pinDots'); if (d) { d.classList.remove('bad'); dots(); } }, 700); }
+      }
+    };
+  }
+  // Developer mode: only reachable inside the tablet's kiosk app (its login lives in the app, not in this public code)
+  function viewDev() {
+    var info = {}; try { info = JSON.parse(window.AndroidKiosk ? window.AndroidKiosk.info() : '{}'); } catch (e) {}
+    var row = function (k, v) { return '<tr><td>' + esc(k) + '</td><td class="r">' + esc(v) + '</td></tr>'; };
+    var used = 0; try { used = (localStorage.getItem(KEY) || '').length; } catch (e) {}
+    return '<h1>🛠️ Developer Mode</h1>' +
+      '<div class="card"><h2>Tablet</h2><div class="btns">' +
+        '<button class="btn sun big" data-devact="exit">📱 Exit kiosk (regular tablet)</button>' +
+        '<button class="btn ghost" data-app="com.android.settings">⚙️ Android settings</button>' +
+        '<button class="btn ghost" data-devact="devopts">🧰 Developer options</button>' +
+        '<button class="btn ghost" data-app="com.tailscale.ipn">🔐 Tailscale</button>' +
+        '<button class="btn ghost" data-devact="reload">🔄 Reload app (get updates)</button>' +
+      '</div></div>' +
+      '<div class="card"><h2>Modes</h2><div class="btns">' +
+        '<button class="btn" data-setmode="cantril">🏞️ Cantril Mode</button><button class="btn" data-setmode="personal">🏠 Personal Mode</button><button class="btn" data-setmode="host">📒 Host Book only</button>' +
+        '<button class="btn ghost" data-devact="pin">🔑 Reset parents\' PIN to 2193</button>' +
+      '</div></div>' +
+      '<div class="card"><h2>Info</h2><table class="breakdown">' +
+        row('Mode', db.settings.mode) + row('Parents\' PIN', db.settings.pin || '2193') + row('Check-ins / feedback', db.entries.length + ' / ' + db.feedback.length) +
+        row('Saved data', Math.round(used / 1024) + ' KB') + row('Online', navigator.onLine ? 'yes' : 'no') + row('Page', location.href) +
+        Object.keys(info).map(function (k) { return row(k, info[k]); }).join('') + '</table></div>';
+  }
+  function setMode(mode) { db.settings.mode = mode; save(); go(modeHome()); }
 
   // ---------- Print ----------
   function printSheet(mode) {
@@ -783,6 +973,18 @@
       if (b.dataset.month) { var d = parseIso(state.date); d.setDate(1); d.setMonth(d.getMonth() + num(b.dataset.month)); state.date = iso(d); return render(); }
       if (b.dataset.mode) { state.totalsMode = b.dataset.mode; return render(); }
       if (b.dataset.print) return printSheet(b.dataset.print);
+      if (b.dataset.pin) { return askPin(function () { setMode(b.dataset.pin === 'host' ? 'personal' : b.dataset.pin); }); }
+      if (b.dataset.devact) {
+        var a = b.dataset.devact;
+        if (a === 'exit' && window.AndroidKiosk) return window.AndroidKiosk.exitKiosk();
+        if (a === 'devopts' && window.AndroidKiosk) return window.AndroidKiosk.openSettings('android.settings.APPLICATION_DEVELOPMENT_SETTINGS');
+        if (a === 'reload') { if (window.AndroidKiosk) return window.AndroidKiosk.reload(); return location.reload(); }
+        if (a === 'pin') { db.settings.pin = '2193'; save(); toast('PIN reset to 2193'); return render(); }
+        return;
+      }
+      if (b.dataset.setmode) { return setMode(b.dataset.setmode); }
+      if (b.dataset.app) { return openExternal(b.dataset.url || '', b.dataset.app); }
+      if (b.dataset.ext) { return openExternal(b.dataset.ext); }
       if (b.dataset.fbnew) { state.fb = blankFb(b.dataset.fbnew); return go('fbform'); }
       if (b.dataset.fb) { var fx = db.feedback.filter(function (x) { return x.id === b.dataset.fb; })[0]; if (fx) { state.fb = JSON.parse(JSON.stringify(fx)); state.fb.likes = state.fb.likes || []; state.fb.needs = state.fb.needs || []; go('fbform'); } return; }
       if (b.id === 'fbPrint') return printFeedback();
@@ -837,7 +1039,9 @@
   }
 
   load();
+  state.view = modeHome();
   render();
+  idleReset();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
   }

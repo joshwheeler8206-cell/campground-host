@@ -207,3 +207,47 @@ a.btn{text-decoration:none}
 .hostback .btn.holding{background:#e7f3ea}
 .hostback .btn.holding::after{content:"";position:absolute;left:0;bottom:0;height:5px;background:var(--forest);animation:holdbar 1.2s linear forwards}
 @keyframes holdbar{from{width:0}to{width:100%}}
+
+/* Cantril / Personal modes */
+.khero{display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;background:linear-gradient(135deg,var(--pine),var(--forest-2));color:#fff;border-radius:var(--r);padding:26px 28px;margin-bottom:18px;box-shadow:0 4px 0 var(--sun-2)}
+.khero h1{color:#fff;font-size:2.3rem;margin:0 0 6px}
+.khero p{margin:0;font-size:1.2rem;opacity:.92}
+.khero.personal{background:linear-gradient(135deg,#2f4a6b,#3f6a8f);box-shadow:0 4px 0 #9ab7d3}
+.bigclock{text-align:right}
+.bigclock .tm{font-size:3.4rem;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.bigclock .dt{font-size:1.05rem;opacity:.9;margin-top:6px}
+.wxcard{display:flex;flex-wrap:wrap;gap:18px;align-items:center;justify-content:space-between;background:#fff;border:2px solid var(--line);border-radius:var(--r);padding:18px 22px;margin-bottom:18px;box-shadow:0 4px 14px rgba(31,77,54,.06)}
+.wxnow{display:flex;align-items:center;gap:16px}
+.wxico{font-size:4rem;line-height:1}
+.wxt{font-size:3rem;font-weight:700;color:var(--pine);line-height:1}
+.wxd{font-size:1.2rem;color:var(--ink)}
+.wxa{font-size:.95rem;color:var(--muted)}
+.wxdays{display:flex;gap:12px;flex-wrap:wrap}
+.wxday{background:#f6f1e6;border-radius:14px;padding:10px 14px;text-align:center;min-width:96px}
+.wxday .dn{font-weight:700;color:var(--pine)}
+.wxday .di{font-size:2rem;line-height:1.2}
+.wxday .dt{font-size:1.15rem}
+.wxday .dp{font-size:.9rem;color:var(--check)}
+.kgrid .tile{min-height:170px}
+.kgrid .tile .t{font-size:1.7rem}
+.kgrid .tile.primary .t{font-size:2.1rem}
+.kgrid .tile.camper{grid-column:auto}
+.kfoot{text-align:center;margin-top:26px}
+.kfoot .btn{opacity:.75}
+.pgrid .tile .ico{font-size:3rem}
+.todos{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.todo{display:flex;gap:14px;align-items:flex-start;background:#fffdf8;border:2px solid var(--line);border-radius:16px;padding:14px 16px}
+.todo .ico{font-size:2.3rem;line-height:1}
+.todo .t{font-weight:700;font-size:1.25rem;color:var(--pine)}
+.todo .d{font-size:1.05rem;color:var(--muted)}
+.kprices td{font-size:1.2rem;padding:12px 6px}
+.emerg{display:flex;align-items:center;gap:22px;border-color:var(--danger);background:#fdeceb}
+.n911{font-size:3.6rem;font-weight:800;color:#fff;background:var(--danger);border-radius:20px;padding:8px 22px;line-height:1}
+.pindots{display:flex;gap:18px;justify-content:center;margin:10px 0 18px}
+.pindots span{width:26px;height:26px;border-radius:50%;border:3px solid var(--forest)}
+.pindots span.on{background:var(--forest)}
+.pindots.bad span{border-color:var(--danger);background:var(--danger);animation:shake .3s}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+.pinpad{display:grid;grid-template-columns:repeat(3,96px);gap:12px;justify-content:center;margin-bottom:14px}
+.pk{height:84px;border-radius:18px;border:2px solid var(--line);background:#fff;font-size:2rem;font-weight:700;color:var(--pine)}
+.pk:active{background:#e7f3ea}
