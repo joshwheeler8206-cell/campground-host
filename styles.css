@@ -284,3 +284,4 @@ a.btn{text-decoration:none}
   #printSheet figcaption{font-size:10px;text-align:center}
 }
 .modal .box{max-height:calc(100vh - 40px);overflow:auto}
+.camframe[hidden]{display:none}

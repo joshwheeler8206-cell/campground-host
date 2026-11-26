@@ -574,6 +574,7 @@
     var guard = setInterval(function () { if ($('#modal').hidden || !document.body.contains(v)) { stop(); clearInterval(guard); } }, 800);
     function live() {
       shot = null; shotImg.hidden = true; v.hidden = useFile;
+      var fr = $('.camframe', m); if (fr) fr.hidden = false;
       btns.innerHTML = '<button class="btn sun big" id="camSnap">📸 ' + (useFile ? 'Open Camera' : 'Take Picture') + '</button><button class="btn ghost big" id="camCancel">Cancel</button>';
       $('#camSnap', m).onclick = function () {
         if (useFile) return file.click();
@@ -584,6 +585,7 @@
     }
     function show(data) {
       shot = data; shotImg.src = data; shotImg.hidden = false; v.hidden = true; wait.hidden = true;
+      var fr2 = $('.camframe', m); if (fr2) fr2.hidden = true;
       btns.innerHTML = '<button class="btn sun big" id="camUse">✓ Use This Picture</button><button class="btn ghost big" id="camRetake">↺ Take It Again</button>';
       $('#camUse', m).onclick = function () { stop(); closeModal(); done(shot); };
       $('#camRetake', m).onclick = live;
