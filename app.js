@@ -18,11 +18,21 @@
     { id: 'credit', name: '💳 Credit' }
   ];
 
+  // Prices the park itself has posted. When this list changes (new version),
+  // the home screen offers a one-tap update. Only list prices the park published.
+  var PARK_PRICES = {
+    version: '2026-11-25',
+    source: 'the park\'s Facebook page (Waubonsie Trail Park Campground)',
+    prices: { full: 25, tent: 10, ada: 80 },
+    note: 'The ADA cabin is $80 a night plus a cleaning fee.'
+  };
+  var CABINS = { rustic: 1, ada: 1 };
   var DEFAULTS = {
     settings: {
       park: 'Waubonsie Trail Park',
-      prices: { full: 25, ew: 20, rustic: 10, ada: 20, tent: 10 },
-      wood: 5, cleaning: 0, pricesConfirmed: false
+      prices: { full: 25, ew: 20, rustic: 10, ada: 80, tent: 10 },
+      wood: 5, cleaning: 0, cabinCleaning: 0, pricesConfirmed: false,
+      priceListSeen: '', pricesChangedAt: null
     },
     entries: [],
     days: {}
@@ -38,7 +48,25 @@
     if (!Array.isArray(db.entries)) db.entries = [];
     if (!db.days || typeof db.days !== 'object') db.days = {};
     if (DEMO && !db.seeded) seedDemo();
+    lockRates();
   }
+  // Every check-in remembers the price it was charged, so changing prices later
+  // never changes old totals. Older check-ins get today's prices locked in once.
+  function lockRates() {
+    var s = db.settings, changed = false;
+    db.entries.forEach(function (e) {
+      if (e.rate == null) { e.rate = num(s.prices[e.type]); changed = true; }
+      if (e.woodRate == null) { e.woodRate = num(s.wood); changed = true; }
+    });
+    if (changed) save();
+  }
+  function parkPriceChanges() {
+    var s = db.settings;
+    return SITE_TYPES.filter(function (t) {
+      return PARK_PRICES.prices[t.id] != null && num(PARK_PRICES.prices[t.id]) !== num(s.prices[t.id]);
+    });
+  }
+  function markPricesChanged() { db.settings.pricesChangedAt = Date.now(); db.settings.pricesConfirmed = true; }
   function seedDemo() {
     db.settings.pricesConfirmed = true;
     var t = todayIso(), y = shiftDay(t, -1), n = Date.now();
@@ -80,12 +108,14 @@
 
   function calc(e) {
     var s = db.settings;
-    var lodging = num(e.nights) * num(s.prices[e.type]);
-    var wood = num(e.wood) * num(s.wood);
+    var lodging = num(e.nights) * rateOf(e);
+    var wood = num(e.wood) * woodRateOf(e);
     var cleaning = num(e.cleaning);
     var donation = num(e.donation);
     return { lodging: lodging, wood: wood, cleaning: cleaning, donation: donation, total: lodging + wood + cleaning + donation };
   }
+  function rateOf(e) { return e.rate != null ? num(e.rate) : num(db.settings.prices[e.type]); }
+  function woodRateOf(e) { return e.woodRate != null ? num(e.woodRate) : num(db.settings.wood); }
   function paid(e) { return e.amountOverride != null && e.amountOverride !== '' ? num(e.amountOverride) : calc(e).total; }
 
   function toast(msg) {
@@ -135,7 +165,7 @@
       };
     }
     if (state.view === 'home') app.innerHTML = viewHome();
-    else if (state.view === 'checkin') { app.innerHTML = viewCheckin(); bindCheckin(); return; }
+    else if (state.view === 'checkin') { app.onchange = null; app.innerHTML = viewCheckin(); bindCheckin(); return; }
     else if (state.view === 'sheet') app.innerHTML = viewSheet();
     else if (state.view === 'totals') app.innerHTML = viewTotals();
     else if (state.view === 'find') app.innerHTML = viewFind();
@@ -150,9 +180,12 @@
     var h = new Date().getHours();
     var greet = h < 12 ? 'Good morning!' : h < 17 ? 'Good afternoon!' : 'Good evening!';
     return '' +
-      (db.settings.pricesConfirmed ? '' :
+      (!db.settings.pricesConfirmed ?
         '<div class="banner"><div><b>First time?</b> Please check the nightly prices so totals come out right.</div>' +
-        '<button class="btn sun" data-go="settings">Set Prices</button></div>') +
+        '<button class="btn sun" data-go="settings">Set Prices</button></div>' :
+        (db.settings.priceListSeen !== PARK_PRICES.version && parkPriceChanges().length ?
+        '<div class="banner"><div><b>The park\'s prices changed.</b> ' + parkPriceChanges().map(function (t) { return esc(t.name) + ' is now ' + money(PARK_PRICES.prices[t.id]) + ' a night'; }).join(', ') + '.</div>' +
+        '<button class="btn sun" data-go="settings">Review Prices</button></div>' : '')) +
       '<div class="hello"><h1>' + greet + '</h1><div class="today">' + esc(niceDate(t)) + '</div></div>' +
       '<div class="big-grid">' +
         '<button class="tile primary" data-new><span class="ico">🏕️</span><span class="t">Check In a Camper</span><span class="d">Write down a new camper and what they paid</span></button>' +
@@ -184,7 +217,7 @@
 
     var typeBtns = SITE_TYPES.map(function (t) {
       return '<button type="button" class="choice' + (d.type === t.id ? ' on' : '') + '" data-type="' + t.id + '">' + esc(t.name) +
-        '<small>' + esc(t.desc) + ' · ' + money(db.settings.prices[t.id]) + '/night</small></button>';
+        '<small>' + esc(t.desc) + ' · ' + money(d.type === t.id ? rateOf(d) : db.settings.prices[t.id]) + '/night</small></button>';
     }).join('');
     var payBtns = PAYS.map(function (p) {
       return '<button type="button" class="choice ' + p.id + (d.pay === p.id ? ' on' : '') + '" data-pay="' + p.id + '">' + p.name + '</button>';
@@ -207,7 +240,7 @@
         stepper('other', 'Other', d.other, 0) +
       '</div></div>' +
       '<div class="card"><div class="step"><span class="num">4</span><h2>Anything extra?</h2></div><div class="steppers">' +
-        stepper('wood', 'Bundles of wood (' + money(db.settings.wood) + ' each)', d.wood, 0) +
+        stepper('wood', 'Bundles of wood (' + money(woodRateOf(d)) + ' each)', d.wood, 0) +
       '</div><div class="row2">' +
         '<div><label class="lbl" for="f-cleaning">Cleaning fee</label><div class="money"><input class="txt" id="f-cleaning" inputmode="decimal" value="' + esc(d.cleaning) + '" placeholder="0.00"></div></div>' +
         '<div><label class="lbl" for="f-donation">Donation</label><div class="money"><input class="txt" id="f-donation" inputmode="decimal" value="' + esc(d.donation) + '" placeholder="0.00"></div></div>' +
@@ -216,7 +249,7 @@
         '<div id="checkNoWrap"' + (d.pay === 'check' ? '' : ' hidden') + '><label class="lbl" for="f-checkno">Check number (optional)</label><input class="txt" id="f-checkno" inputmode="numeric" value="' + esc(d.checkNo) + '"></div>' +
       '</div>' +
       '<div class="card"><div class="step"><span class="num">6</span><h2>Check the total</h2></div>' +
-        '<table class="breakdown" id="breakdown"></table>' +
+        '<table class="breakdown" id="breakdown"></table><p class="hint" id="oldRate" hidden></p>' +
         '<label class="lbl" for="f-override">Amount actually paid <span style="font-weight:400;color:var(--muted)">(only change this if it was different)</span></label>' +
         '<div class="money"><input class="txt" id="f-override" inputmode="decimal" value="' + (d.amountOverride != null ? esc(d.amountOverride) : '') + '" placeholder="Same as total"></div>' +
         '<label class="lbl" for="f-note">Notes (optional)</label><textarea class="txt" id="f-note" placeholder="Leaving early, owes $5, etc.">' + esc(d.note) + '</textarea>' +
@@ -244,8 +277,16 @@
   function refreshTotal() {
     readForm();
     var d = state.draft, c = calc(d);
-    var rows = [[typeName(d.type) + ' — ' + d.nights + ' night' + (d.nights == 1 ? '' : 's') + ' × ' + money(db.settings.prices[d.type]), c.lodging]];
-    if (num(d.wood)) rows.push(['Wood — ' + d.wood + ' × ' + money(db.settings.wood), c.wood]);
+    var rows = [[typeName(d.type) + ' — ' + d.nights + ' night' + (d.nights == 1 ? '' : 's') + ' × ' + money(rateOf(d)), c.lodging]];
+    if (num(d.wood)) rows.push(['Wood — ' + d.wood + ' × ' + money(woodRateOf(d)), c.wood]);
+    var now = num(db.settings.prices[d.type]), nowWood = num(db.settings.wood);
+    var old = d.id && (rateOf(d) !== now || (num(d.wood) && woodRateOf(d) !== nowWood));
+    var oldNote = $('#oldRate');
+    if (oldNote) {
+      oldNote.hidden = !old;
+      if (old) oldNote.innerHTML = 'This check-in keeps the price from the day it was written down. Today\'s price is ' + money(now) + ' a night' +
+        (num(d.wood) ? ' and ' + money(nowWood) + ' a bundle' : '') + '. <button type="button" class="btn ghost" id="useToday">Use today\'s price</button>';
+    }
     if (c.cleaning) rows.push(['Cleaning', c.cleaning]);
     if (c.donation) rows.push(['Donation', c.donation]);
     rows.push(['<b>Total</b>', c.total]);
@@ -264,9 +305,18 @@
     app.onclick = function (ev) {
       var b = ev.target.closest('button'); if (!b) return;
       var d = state.draft;
-      if (b.dataset.type) {
+      if (b.id === 'useToday') {
+        delete d.rate; delete d.woodRate;
+        app.querySelectorAll('[data-type] small').forEach(function (x, i) { x.textContent = SITE_TYPES[i].desc + ' · ' + money(db.settings.prices[SITE_TYPES[i].id]) + '/night'; });
+        toast('Using today\'s price');
+      } else if (b.dataset.type) {
+        var was = d.type;
         d.type = b.dataset.type;
+        if (was !== d.type) delete d.rate;   // a different kind of site → today's price
         app.querySelectorAll('[data-type]').forEach(function (x) { x.classList.toggle('on', x === b); });
+        var cf = $('#f-cleaning'), cc = num(db.settings.cabinCleaning), usual = num(db.settings.cleaning);
+        if (cc && CABINS[d.type] && !CABINS[was] && (cf.value.trim() === '' || num(cf.value) === usual)) cf.value = String(cc);
+        else if (cc && !CABINS[d.type] && CABINS[was] && num(cf.value) === cc) cf.value = usual ? String(usual) : '';
       } else if (b.dataset.pay) {
         d.pay = b.dataset.pay;
         app.querySelectorAll('[data-pay]').forEach(function (x) { x.classList.toggle('on', x === b); });
@@ -310,6 +360,7 @@
     if (missing.length) { alertBox('Almost done!', 'Please fill in ' + missing.join(' and ') + '.'); return; }
     if (d.amountOverride != null && isNaN(parseFloat(d.amountOverride))) { alertBox('Check the amount', 'The "Amount actually paid" box needs a number, or leave it empty.'); return; }
     var rec = JSON.parse(JSON.stringify(d));
+    rec.rate = rateOf(d); rec.woodRate = woodRateOf(d);
     rec.total = paid(rec);
     rec.updatedAt = Date.now();
     if (rec.id) {
@@ -443,21 +494,50 @@
   // ---------- Settings ----------
   function viewSettings() {
     var s = db.settings;
-    var priceRows = SITE_TYPES.map(function (t) {
-      return '<div><label class="lbl" for="p-' + t.id + '">' + esc(t.name) + ' — per night</label><div class="money"><input class="txt" id="p-' + t.id + '" inputmode="decimal" value="' + num(s.prices[t.id]) + '"></div></div>';
+    var priceRow = function (id, label, val) {
+      return '<div class="prow"><label class="lbl" for="p-' + id + '">' + label + '</label><div class="pctl">' +
+        '<button type="button" class="sbtn minus" data-pstep="' + id + '" data-d="-1" aria-label="One dollar less">−</button>' +
+        '<div class="money"><input class="txt" id="p-' + id + '" inputmode="decimal" value="' + num(val) + '"></div>' +
+        '<button type="button" class="sbtn" data-pstep="' + id + '" data-d="1" aria-label="One dollar more">+</button></div></div>';
+    };
+    var priceRows = SITE_TYPES.map(function (t) { return priceRow(t.id, esc(t.name) + ' — per night', s.prices[t.id]); }).join('');
+    var changes = parkPriceChanges();
+    var posted = SITE_TYPES.filter(function (t) { return PARK_PRICES.prices[t.id] != null; }).map(function (t) {
+      var diff = num(PARK_PRICES.prices[t.id]) !== num(s.prices[t.id]);
+      return '<tr><td>' + esc(t.name) + '</td><td class="r"><b>' + money(PARK_PRICES.prices[t.id]) + '</b></td><td>' +
+        (diff ? '<span class="bad">you have ' + money(s.prices[t.id]) + '</span>' : '<span class="good">✓ matches</span>') + '</td></tr>';
     }).join('');
     return '<h1>Prices &amp; Backup</h1>' +
-      '<div class="card"><h2>Nightly prices</h2><div class="row2">' + priceRows +
-        '<div><label class="lbl" for="p-wood">Wood — per bundle</label><div class="money"><input class="txt" id="p-wood" inputmode="decimal" value="' + num(s.wood) + '"></div></div>' +
-        '<div><label class="lbl" for="p-cleaning">Usual cleaning fee <span style="font-weight:400;color:var(--muted)">(0 = none)</span></label><div class="money"><input class="txt" id="p-cleaning" inputmode="decimal" value="' + num(s.cleaning) + '"></div></div>' +
+      '<div class="card"><h2>The park\'s posted prices</h2>' +
+        '<p style="font-size:1.05rem">From ' + esc(PARK_PRICES.source) + '. ' + esc(PARK_PRICES.note) + '</p>' +
+        '<table class="breakdown posted">' + posted + '</table>' +
+        (changes.length ? '<div class="btns" style="margin-top:12px"><button class="btn sun big" id="useParkPrices">✓ Use the Park\'s Prices</button>' +
+          (s.priceListSeen !== PARK_PRICES.version ? '<button class="btn ghost" id="keepPrices">Keep my prices</button>' : '') + '</div>'
+          : '<p class="hint">Your prices match what the park posted.</p>') +
+      '</div>' +
+      '<div class="card"><h2>Your prices</h2><p class="hint" style="margin-top:0">Tap <b>−</b> or <b>+</b> to change by $1, or type a new amount. Changes save by themselves.</p><div class="prices">' + priceRows +
+        priceRow('wood', 'Wood — per bundle', s.wood) +
+        priceRow('cleaning', 'Usual cleaning fee <span style="font-weight:400;color:var(--muted)">(0 = none)</span>', s.cleaning) +
+        priceRow('cabinCleaning', 'Cabin cleaning fee <span style="font-weight:400;color:var(--muted)">(filled in when a cabin is picked)</span>', s.cabinCleaning) +
       '</div><label class="lbl" for="p-park">Campground name</label><input class="txt" id="p-park" value="' + esc(s.park) + '">' +
-      '<p class="hint">Changing a price changes the totals for old check-ins too — unless "Amount actually paid" was typed in.</p>' +
+      '<p class="hint">New prices are used for <b>new</b> check-ins. Old check-ins keep the price they were charged.' +
+        (s.pricesChangedAt ? ' Prices last changed ' + esc(new Date(s.pricesChangedAt).toLocaleDateString()) + '.' : '') + '</p>' +
       '<div class="btns" style="margin-top:12px"><button class="btn big" id="savePrices">✓ Save Prices</button></div></div>' +
       (DEMO ? '' : '<div class="card"><h2>Practice</h2><p style="font-size:1.1rem">Want to try things out first? Practice Mode has pretend campers. It never touches the real book.</p><div class="btns"><a class="btn sun big" href="./?demo">🎓 Open Practice Mode</a></div></div>') +
       '<div class="card"><h2>Backup copy</h2><p style="font-size:1.1rem">Everything is kept on this device only. Once a week, tap <b>Save a Backup</b> — it puts a file in your Downloads folder. If the tablet ever breaks, that file brings everything back.</p>' +
         '<div class="btns"><button class="btn sun big" id="backupBtn">💾 Save a Backup</button><button class="btn ghost" id="csvBtn">📊 Spreadsheet (CSV)</button><button class="btn ghost" id="restoreBtn">📂 Restore from Backup</button></div>' +
         '<input type="file" id="restoreFile" accept=".json,application/json" hidden>' +
         '<p class="hint">' + db.entries.length + ' check-ins saved on this device.' + (s.lastBackup ? ' Last backup: ' + esc(new Date(s.lastBackup).toLocaleDateString()) + '.' : ' No backup yet.') + '</p></div>';
+  }
+  function savePriceForm() {
+    var s = db.settings, before = JSON.stringify([s.prices, s.wood]);
+    SITE_TYPES.forEach(function (t) { s.prices[t.id] = Math.max(0, num($('#p-' + t.id).value)); });
+    s.wood = Math.max(0, num($('#p-wood').value)); s.cleaning = Math.max(0, num($('#p-cleaning').value));
+    s.cabinCleaning = Math.max(0, num($('#p-cabinCleaning').value));
+    s.park = $('#p-park').value.trim() || 'Campground';
+    if (JSON.stringify([s.prices, s.wood]) !== before) markPricesChanged();
+    s.pricesConfirmed = true;
+    save();
   }
   function download(name, text, type) {
     var blob = new Blob([text], { type: type });
@@ -527,13 +607,19 @@
       if (b.dataset.month) { var d = parseIso(state.date); d.setDate(1); d.setMonth(d.getMonth() + num(b.dataset.month)); state.date = iso(d); return render(); }
       if (b.dataset.mode) { state.totalsMode = b.dataset.mode; return render(); }
       if (b.dataset.print) return printSheet(b.dataset.print);
-      if (b.id === 'savePrices') {
-        var s = db.settings;
-        SITE_TYPES.forEach(function (t) { s.prices[t.id] = num($('#p-' + t.id).value); });
-        s.wood = num($('#p-wood').value); s.cleaning = num($('#p-cleaning').value);
-        s.park = $('#p-park').value.trim() || 'Campground'; s.pricesConfirmed = true;
-        save(); toast('✓ Prices saved'); return render();
+      if (b.id === 'savePrices') { savePriceForm(); toast('✓ Prices saved'); return render(); }
+      if (b.dataset.pstep) {
+        var inp = $('#p-' + b.dataset.pstep);
+        inp.value = Math.max(0, Math.round(num(inp.value)) + num(b.dataset.d));
+        savePriceForm(); toast('✓ Saved — ' + money(inp.value)); return;
       }
+      if (b.id === 'useParkPrices') {
+        var ch = parkPriceChanges();
+        ch.forEach(function (t) { db.settings.prices[t.id] = num(PARK_PRICES.prices[t.id]); });
+        db.settings.priceListSeen = PARK_PRICES.version; markPricesChanged();
+        save(); toast('✓ Updated ' + ch.length + ' price' + (ch.length === 1 ? '' : 's')); return render();
+      }
+      if (b.id === 'keepPrices') { db.settings.priceListSeen = PARK_PRICES.version; db.settings.pricesConfirmed = true; save(); toast('OK — kept your prices'); return render(); }
       if (b.id === 'backupBtn') {
         db.settings.lastBackup = Date.now(); save();
         download('campground-backup-' + todayIso() + '.json', JSON.stringify(db, null, 1), 'application/json');
@@ -542,6 +628,8 @@
       if (b.id === 'csvBtn') { download('campground-checkins-' + todayIso() + '.csv', csv(), 'text/csv'); return toast('Spreadsheet saved to Downloads'); }
       if (b.id === 'restoreBtn') return $('#restoreFile').click();
     };
+    if ($('.prices')) $('#app').onchange = function (ev) { if (ev.target.id && ev.target.id.indexOf('p-') === 0) { savePriceForm(); toast('✓ Saved'); } };
+    else $('#app').onchange = null;
     var q = $('#q');
     if (q) { q.oninput = function () { state.q = q.value; $('#results').innerHTML = findResults(q.value); }; q.focus(); var v = q.value; q.value = ''; q.value = v; }
     var c = $('#counted');
@@ -559,7 +647,7 @@
           db.entries = Object.keys(byId).map(function (k) { return byId[k]; });
           db.days = Object.assign({}, data.days || {}, db.days);
           if (data.settings) { db.settings = Object.assign({}, db.settings, data.settings); db.settings.prices = Object.assign({}, DEFAULTS.settings.prices, data.settings.prices || {}); }
-          save(); toast('✓ Backup restored'); render();
+          lockRates(); save(); toast('✓ Backup restored'); render();
         });
       };
       r.readAsText(f);

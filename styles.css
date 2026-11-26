@@ -165,3 +165,13 @@ input.txt:focus,select.txt:focus,textarea.txt:focus{outline:4px solid rgba(242,1
 .demobar .btn{min-height:54px;padding:10px 18px;font-size:1.05rem}
 a.btn{text-decoration:none}
 @media print{.demobar{display:none!important}}
+/* price settings */
+.prices{display:grid;grid-template-columns:1fr 1fr;gap:14px 22px}
+.prow .pctl{display:flex;align-items:center;gap:10px}
+.prow .pctl .money{flex:1;min-width:0}
+.prow .pctl .txt{font-size:1.4rem;font-weight:700;text-align:center}
+.posted td{padding:8px 6px;font-size:1.1rem}
+.posted .bad{color:#b4231b;font-weight:700}
+.posted .good{color:var(--forest);font-weight:700}
+#oldRate .btn{margin-top:8px}
+@media (max-width:640px){.prices{grid-template-columns:1fr}}
