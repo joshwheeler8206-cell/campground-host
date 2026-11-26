@@ -175,3 +175,35 @@ a.btn{text-decoration:none}
 .posted .good{color:var(--forest);font-weight:700}
 #oldRate .btn{margin-top:8px}
 @media (max-width:640px){.prices{grid-template-columns:1fr}}
+
+/* Camper feedback */
+.tile.camper{background:linear-gradient(135deg,#f6d27a,var(--sun));border-color:var(--sun-2)}
+.tile.camper .t{color:var(--pine)} .tile.camper .d{color:#4a3d18}
+.fbstart .tile.primary{grid-column:auto}
+.stars-row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.star{width:96px;height:96px;border-radius:22px;border:3px solid #d8cdb6;background:#fff;font-size:3.4rem;line-height:1;color:#d8cdb6}
+.star.on{color:var(--sun-2);border-color:var(--sun-2);background:#fff6dc}
+.starword{text-align:center;font-size:1.5rem;font-weight:700;color:var(--pine);margin-top:10px;min-height:1.6em}
+.fbchoices{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.fbchoices .choice{min-height:70px;justify-content:center}
+.fbchoices.need .choice.on{border-color:var(--clay);background:#fbece4;box-shadow:inset 0 0 0 2px var(--clay)}
+.fbchoices.need .choice.on::after{color:var(--clay)}
+.choice.followup{width:100%;text-align:center;align-items:center}
+.fbchips{display:flex;flex-wrap:wrap;gap:8px}
+.fbchip{border-radius:999px;padding:8px 14px;font-size:1rem;border:2px solid var(--line);background:#fff}
+.fbchip.like{background:#e7f3ea;border-color:#a9d1b4}
+.fbchip.need{background:#fbece4;border-color:#e6b9a3}
+.fbrow .stars{color:var(--sun-2);letter-spacing:1px}
+.tag.followup{background:#fbece4;color:var(--clay);border:1px solid #e6b9a3}
+.fbhero{background:linear-gradient(135deg,var(--forest),var(--forest-2));color:#fff;border-radius:var(--r);padding:26px 24px;margin-bottom:18px;text-align:center}
+.fbhero h1{color:#fff;font-size:2.2rem} .fbhero p{font-size:1.25rem;margin:0}
+.fbthanks{text-align:center;padding:40px 10px}
+.fbthanks .big{font-size:5rem}
+.fbthanks h1{font-size:3rem}
+.fbthanks p{font-size:1.35rem}
+.fbthanks .handback{font-weight:700;color:var(--forest);font-size:1.5rem;margin:26px 0}
+.fbthanks .hostback{margin-top:60px}
+.hostback .btn{position:relative;overflow:hidden}
+.hostback .btn.holding{background:#e7f3ea}
+.hostback .btn.holding::after{content:"";position:absolute;left:0;bottom:0;height:5px;background:var(--forest);animation:holdbar 1.2s linear forwards}
+@keyframes holdbar{from{width:0}to{width:100%}}

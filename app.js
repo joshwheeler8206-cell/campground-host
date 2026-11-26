@@ -35,7 +35,8 @@
       priceListSeen: '', pricesChangedAt: null
     },
     entries: [],
-    days: {}
+    days: {},
+    feedback: []
   };
 
   // ---------- storage ----------
@@ -47,6 +48,7 @@
     db.settings.prices = Object.assign({}, DEFAULTS.settings.prices, db.settings.prices || {});
     if (!Array.isArray(db.entries)) db.entries = [];
     if (!db.days || typeof db.days !== 'object') db.days = {};
+    if (!Array.isArray(db.feedback)) db.feedback = [];
     if (DEMO && !db.seeded) seedDemo();
     lockRates();
   }
@@ -79,6 +81,10 @@
       mk(y, 'Lopez, Maria', '', 'ada', 2, 2, 2, 0, 'check', { checkNo: '2214' }),
       mk(t, 'Hansen, Dale', '7', 'full', 2, 1, 2, 2, 'cash', { donation: '5' }),
       mk(t, 'Brown, Sue', '12', 'tent', 1, 0, 1, 1, 'cash', { note: 'Leaving early Sunday' })
+    ];
+    db.feedback = [
+      { id: 'demofb1', by: 'host', date: y, name: 'Peterson, Gary', site: '3', stars: 5, likes: ['Friendly hosts', 'Quiet & peaceful'], needs: [], comment: 'Best little park around. Will be back in the spring.', followUp: false, createdAt: n++ },
+      { id: 'demofb2', by: 'camper', date: t, name: '', site: '12', stars: 3, likes: ['Pretty park'], needs: ['Showers', 'Bugs'], comment: 'Shower on the left only had cold water.', followUp: true, createdAt: n++ }
     ];
     db.seeded = true;
     save();
@@ -143,13 +149,19 @@
     try { history.pushState({ v: view }, ''); } catch (e) {}
     render(); window.scrollTo(0, 0);
   }
-  window.addEventListener('popstate', function () { if (state.view !== 'home') { state.view = 'home'; render(); } });
+  window.addEventListener('popstate', function () {
+    // a camper holding the tablet should not be able to back out into the book
+    if (state.view === 'fbthanks' || (state.view === 'fbform' && state.fb && state.fb.by === 'camper')) { try { history.pushState({ v: state.view }, ''); } catch (e) {} return; }
+    if (state.view !== 'home') { state.view = 'home'; render(); }
+  });
   $('#homeBtn').onclick = function () { go('home'); };
 
   function render() {
     $('#parkName').textContent = db.settings.park || 'Campground';
     document.title = (db.settings.park || 'Campground') + ' · Host Book';
-    $('#homeBtn').hidden = state.view === 'home';
+    var camperMode = (state.view === 'fbform' && state.fb && state.fb.by === 'camper') || state.view === 'fbthanks';
+    $('#homeBtn').hidden = state.view === 'home' || camperMode;
+    document.body.classList.toggle('camper-mode', camperMode);
     var old = $('.savebar'); if (old) old.remove();
     var app = $('#app');
     var db0 = $('#demoBar');
@@ -170,6 +182,9 @@
     else if (state.view === 'totals') app.innerHTML = viewTotals();
     else if (state.view === 'find') app.innerHTML = viewFind();
     else if (state.view === 'settings') app.innerHTML = viewSettings();
+    else if (state.view === 'feedback') app.innerHTML = viewFeedback();
+    else if (state.view === 'fbform') { app.onchange = null; app.innerHTML = viewFbForm(); bindFbForm(); return; }
+    else if (state.view === 'fbthanks') { app.innerHTML = viewFbThanks(); bindFbThanks(); return; }
     bindCommon();
   }
 
@@ -192,6 +207,7 @@
         '<button class="tile" data-go="sheet"><span class="ico">📋</span><span class="t">Today\'s Sheet</span><span class="d">See, fix or print everyone checked in</span></button>' +
         '<button class="tile" data-go="totals"><span class="ico">🧮</span><span class="t">Totals &amp; Deposit</span><span class="d">Add up cash, checks &amp; credit</span></button>' +
         '<button class="tile" data-go="find"><span class="ico">🔍</span><span class="t">Find a Camper</span><span class="d">Look up someone from before</span></button>' +
+        '<button class="tile" data-go="feedback"><span class="ico">💬</span><span class="t">Camper Feedback</span><span class="d">Walk around and ask how their stay is going</span></button>' +
         '<button class="tile" data-go="settings"><span class="ico">⚙️</span><span class="t">Prices &amp; Backup</span><span class="d">Change prices, save a backup copy</span></button>' +
         '<a class="tile" href="guide/" style="text-decoration:none"><span class="ico">📺</span><span class="t">How-To Video</span><span class="d">Watch a 3-minute guide &amp; print instructions</span></a>' +
         (DEMO ? '' : '<a class="tile" href="./?demo" style="text-decoration:none"><span class="ico">🎓</span><span class="t">Practice Mode</span><span class="d">Try it with pretend campers</span></a>') +
@@ -527,7 +543,7 @@
       '<div class="card"><h2>Backup copy</h2><p style="font-size:1.1rem">Everything is kept on this device only. Once a week, tap <b>Save a Backup</b> — it puts a file in your Downloads folder. If the tablet ever breaks, that file brings everything back.</p>' +
         '<div class="btns"><button class="btn sun big" id="backupBtn">💾 Save a Backup</button><button class="btn ghost" id="csvBtn">📊 Spreadsheet (CSV)</button><button class="btn ghost" id="restoreBtn">📂 Restore from Backup</button></div>' +
         '<input type="file" id="restoreFile" accept=".json,application/json" hidden>' +
-        '<p class="hint">' + db.entries.length + ' check-ins saved on this device.' + (s.lastBackup ? ' Last backup: ' + esc(new Date(s.lastBackup).toLocaleDateString()) + '.' : ' No backup yet.') + '</p></div>';
+        '<p class="hint">' + db.entries.length + ' check-ins and ' + db.feedback.length + ' feedback saved on this device.' + (s.lastBackup ? ' Last backup: ' + esc(new Date(s.lastBackup).toLocaleDateString()) + '.' : ' No backup yet.') + '</p></div>';
   }
   function savePriceForm() {
     var s = db.settings, before = JSON.stringify([s.prices, s.wood]);
@@ -554,6 +570,166 @@
         e.checkNo, c.cleaning ? c.cleaning.toFixed(2) : '', c.donation ? c.donation.toFixed(2) : '', e.wood || '', p.toFixed(2), e.note].map(q).join(',');
     });
     return [head.join(',')].concat(rows).join('\r\n');
+  }
+
+
+  // ---------- Camper feedback ----------
+  var FB_LIKES = ['Clean bathrooms', 'Hot showers', 'Friendly hosts', 'Quiet & peaceful', 'Nice sites', 'Good electric', 'Good water', 'Pretty park', 'Fair price', 'Kid friendly'];
+  var FB_NEEDS = ['Bathrooms need cleaning', 'Showers', 'Trash pickup', 'Too noisy', 'Bugs', 'Electric problem', 'Water problem', 'Site needs work', 'Mowing', 'Lighting at night', 'Wi-Fi'];
+  function blankFb(by) { return { id: null, by: by, date: todayIso(), name: '', site: '', stars: 0, likes: [], needs: [], comment: '', followUp: false }; }
+  function starTxt(n) { n = num(n); return n ? new Array(n + 1).join('★') + new Array(6 - n).join('☆') : 'No stars'; }
+  function fbSummary(list) {
+    var rated = list.filter(function (f) { return num(f.stars) > 0; }), sum = 0, likes = {}, needs = {};
+    rated.forEach(function (f) { sum += num(f.stars); });
+    list.forEach(function (f) { (f.likes || []).forEach(function (x) { likes[x] = (likes[x] || 0) + 1; }); (f.needs || []).forEach(function (x) { needs[x] = (needs[x] || 0) + 1; }); });
+    var top = function (o) { return Object.keys(o).sort(function (a, b) { return o[b] - o[a]; }).slice(0, 4).map(function (k) { return { k: k, n: o[k] }; }); };
+    return { count: list.length, avg: rated.length ? sum / rated.length : 0, likes: top(likes), needs: top(needs), followUps: list.filter(function (f) { return f.followUp && !f.handled; }).length };
+  }
+  function viewFeedback() {
+    var ym = todayIso().slice(0, 7);
+    var all = db.feedback.slice().sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+    var month = all.filter(function (f) { return (f.date || '').slice(0, 7) === ym; });
+    var s = fbSummary(month);
+    var chips = function (arr, cls) { return arr.length ? arr.map(function (x) { return '<span class="fbchip ' + cls + '">' + esc(x.k) + ' <b>' + x.n + '</b></span>'; }).join('') : '<span class="hint">Nothing yet</span>'; };
+    var list = all.length ? all.slice(0, 80).map(function (f) {
+      return '<button class="guest fbrow" data-fb="' + f.id + '">' +
+        '<div class="site"><small>SITE</small>' + esc(f.site || '–') + '</div>' +
+        '<div class="main"><div class="nm"><span class="stars">' + starTxt(f.stars) + '</span> ' + esc(f.name || 'A camper') +
+        (f.followUp && !f.handled ? ' <span class="tag followup">Wants a call back</span>' : '') + '</div>' +
+        '<div class="meta">' + esc(shortDate(f.date)) + ' · ' + (f.by === 'camper' ? 'Camper typed it' : 'Host wrote it') + '</div>' +
+        (f.needs && f.needs.length ? '<div class="meta">🔧 ' + esc(f.needs.join(', ')) + '</div>' : '') +
+        (f.comment ? '<div class="meta">“' + esc(f.comment.length > 140 ? f.comment.slice(0, 140) + '…' : f.comment) + '”</div>' : '') +
+        '</div></button>';
+    }).join('') : '<div class="empty">No feedback yet. Tap one of the big buttons above to start.</div>';
+    return '<h1>Camper Feedback</h1>' +
+      '<p style="font-size:1.1rem;margin-top:-4px">Walk around and ask campers how their stay is going. Write it down yourself, or hand them the tablet.</p>' +
+      '<div class="big-grid fbstart">' +
+        '<button class="tile primary" data-fbnew="host"><span class="ico">📝</span><span class="t">I\'ll Write It Down</span><span class="d">Ask the camper and tap in what they say</span></button>' +
+        '<button class="tile camper" data-fbnew="camper"><span class="ico">🙋</span><span class="t">Hand It to the Camper</span><span class="d">Big, simple screen they fill in themselves</span></button>' +
+      '</div>' +
+      '<div class="card" style="margin-top:18px"><h2>This month</h2><div class="stats" style="margin:8px 0 14px">' +
+        '<div class="stat"><div class="n">' + s.count + '</div><div class="l">Feedback this month</div></div>' +
+        '<div class="stat"><div class="n">' + (s.avg ? s.avg.toFixed(1) + ' ★' : '–') + '</div><div class="l">Average stars</div></div>' +
+        '<div class="stat"><div class="n">' + s.followUps + '</div><div class="l">Want a call back</div></div>' +
+      '</div><h3>What campers like</h3><div class="fbchips">' + chips(s.likes, 'like') + '</div>' +
+      '<h3 style="margin-top:14px">What needs work</h3><div class="fbchips">' + chips(s.needs, 'need') + '</div>' +
+      '<div class="btns" style="margin-top:16px"><button class="btn ghost" id="fbPrint">🖨 Print this month</button><button class="btn ghost" id="fbCsv">📊 Spreadsheet (CSV)</button></div></div>' +
+      '<h2>All feedback</h2>' + (all.length ? '<p class="hint" style="font-size:1.05rem">Tap one to read it all, mark it handled, or delete it.</p>' : '') + list;
+  }
+  function viewFbForm() {
+    var f = state.fb, camper = f.by === 'camper', editing = !!f.id;
+    var chipBtns = function (arr, key) {
+      return arr.map(function (x) { return '<button type="button" class="choice fbpick' + (f[key].indexOf(x) >= 0 ? ' on' : '') + '" data-fbpick="' + key + '" data-v="' + esc(x) + '">' + esc(x) + '</button>'; }).join('');
+    };
+    var stars = [1, 2, 3, 4, 5].map(function (n) { return '<button type="button" class="star' + (num(f.stars) >= n ? ' on' : '') + '" data-star="' + n + '" aria-label="' + n + ' star' + (n > 1 ? 's' : '') + '">★</button>'; }).join('');
+    var words = ['', 'Not good', 'Could be better', 'OK', 'Good', 'Great!'];
+    return (camper ? '<div class="fbhero"><h1>Thanks for staying with us!</h1><p>Tell us how your stay is going. It only takes a minute.</p></div>'
+                   : '<h1>' + (editing ? 'Feedback' : 'Write Down Feedback') + '</h1><p class="hint" style="font-size:1.05rem;margin-top:-4px">Every part is optional. Fill in what the camper tells you.</p>') +
+      '<div class="card"><div class="step"><span class="num">1</span><h2>' + (camper ? 'How is your stay?' : 'How do they rate their stay?') + '</h2></div>' +
+        '<div class="stars-row">' + stars + '</div><div class="starword" id="starWord">' + (words[num(f.stars)] || (camper ? 'Tap a star' : 'Tap a star')) + '</div></div>' +
+      '<div class="card"><div class="step"><span class="num">2</span><h2>' + (camper ? 'What do you like?' : 'What do they like?') + '</h2></div><p class="hint" style="margin-top:-6px">Tap all that fit.</p><div class="choices fbchoices">' + chipBtns(FB_LIKES, 'likes') + '</div></div>' +
+      '<div class="card"><div class="step"><span class="num">3</span><h2>What could be better?</h2></div><p class="hint" style="margin-top:-6px">Tap all that fit.</p><div class="choices fbchoices need">' + chipBtns(FB_NEEDS, 'needs') + '</div></div>' +
+      '<div class="card"><div class="step"><span class="num">4</span><h2>' + (camper ? 'Anything else you\'d like to tell us?' : 'Anything else they said?') + '</h2></div>' +
+        '<textarea class="txt" id="fb-comment" placeholder="' + (camper ? 'Type here, or tap the microphone on the keyboard to talk' : 'Write it in their words') + '">' + esc(f.comment) + '</textarea></div>' +
+      '<div class="card"><div class="step"><span class="num">5</span><h2>' + (camper ? 'About you (optional)' : 'Who is it? (optional)') + '</h2></div>' +
+        '<div class="row2"><div><label class="lbl" for="fb-name">Name</label><input class="txt" id="fb-name" autocapitalize="words" autocomplete="off" value="' + esc(f.name) + '" placeholder="' + (camper ? 'You can leave this empty' : 'Last name, First name') + '"></div>' +
+        '<div><label class="lbl" for="fb-site">Site number</label><input class="txt" id="fb-site" inputmode="numeric" value="' + esc(f.site) + '" placeholder="Site #"></div></div>' +
+        '<button type="button" class="choice fbpick followup' + (f.followUp ? ' on' : '') + '" id="fbFollow" style="margin-top:14px">' + (camper ? '🙋 Please have a host come talk to me' : '🙋 They want someone to follow up') + '</button></div>' +
+      (editing ? '<div class="card"><p class="hint" style="margin-top:0">Written down ' + esc(niceDate(f.date)) + ' · ' + (f.by === 'camper' ? 'the camper typed it' : 'the host wrote it') + '</p><div class="btns">' +
+        (f.followUp ? '<button class="btn ' + (f.handled ? 'ghost' : 'sun') + '" id="fbHandled">' + (f.handled ? '↺ Mark as not handled' : '✓ Mark follow-up handled') + '</button>' : '') +
+        '<button class="btn danger" id="fbDel">🗑 Delete this feedback</button></div></div>' : '');
+  }
+  function readFb() {
+    var f = state.fb;
+    f.comment = $('#fb-comment').value.trim(); f.name = $('#fb-name').value.trim(); f.site = $('#fb-site').value.trim();
+  }
+  function bindFbForm() {
+    var f = state.fb, camper = f.by === 'camper';
+    var bar = document.createElement('div');
+    bar.className = 'savebar';
+    bar.innerHTML = '<div class="inner"><div class="tot">' + (camper ? 'All done? ' : 'Feedback ') + '<span>' + (camper ? 'Tap Send when you\'re finished' : 'Saved on this tablet only') + '</span></div>' +
+      '<div class="btns"><button class="btn ghost" id="fbCancel">' + (camper ? 'Host: go back' : 'Cancel') + '</button><button class="btn sun big" id="fbSave">' + (camper ? '✓ Send' : '✓ Save Feedback') + '</button></div></div>';
+    document.body.appendChild(bar);
+    var app = $('#app'), words = ['', 'Not good', 'Could be better', 'OK', 'Good', 'Great!'];
+    app.oninput = null;
+    app.onclick = function (ev) {
+      var b = ev.target.closest('button'); if (!b) return;
+      if (b.dataset.star) {
+        f.stars = num(b.dataset.star) === num(f.stars) ? 0 : num(b.dataset.star);
+        app.querySelectorAll('[data-star]').forEach(function (x) { x.classList.toggle('on', num(x.dataset.star) <= num(f.stars)); });
+        $('#starWord').textContent = words[f.stars] || 'Tap a star';
+      } else if (b.dataset.fbpick) {
+        var arr = f[b.dataset.fbpick], v = b.dataset.v, i = arr.indexOf(v);
+        if (i >= 0) arr.splice(i, 1); else arr.push(v);
+        b.classList.toggle('on', i < 0);
+      } else if (b.id === 'fbFollow') {
+        f.followUp = !f.followUp; b.classList.toggle('on', f.followUp);
+      } else if (b.id === 'fbHandled') {
+        readFb(); f.handled = !f.handled; saveFb(true);
+      } else if (b.id === 'fbDel') {
+        confirmBox('Delete this feedback?', 'It cannot be undone.', 'Yes, delete it', function () {
+          db.feedback = db.feedback.filter(function (x) { return x.id !== f.id; }); save(); toast('Feedback deleted'); go('feedback');
+        }, true);
+      }
+    };
+    $('#fbCancel').onclick = function () {
+      if (!camper) return go('feedback');
+      var has = f.stars || f.likes.length || f.needs.length || $('#fb-comment').value.trim();
+      if (!has) return go('feedback');
+      confirmBox('Go back without saving?', 'What the camper filled in will not be kept.', 'Yes, go back', function () { go('feedback'); }, true);
+    };
+    $('#fbSave').onclick = function () { readFb(); saveFb(false); };
+  }
+  function saveFb(stay) {
+    var f = state.fb;
+    if (!f.stars && !f.likes.length && !f.needs.length && !f.comment && !f.followUp) {
+      return alertBox('Nothing filled in yet', f.by === 'camper' ? 'Tap some stars or buttons first, then tap Send.' : 'Tap some stars, buttons, or write what they said first.');
+    }
+    var rec = JSON.parse(JSON.stringify(f));
+    rec.updatedAt = Date.now();
+    if (rec.id) db.feedback = db.feedback.map(function (x) { return x.id === rec.id ? Object.assign({}, x, rec) : x; });
+    else { rec.id = uid(); rec.createdAt = Date.now(); db.feedback.push(rec); }
+    if (!save()) return;
+    if (stay) { state.fb = rec; toast(rec.handled ? '✓ Marked handled' : 'Marked not handled'); return render(); }
+    if (rec.by === 'camper' && !f.id) return go('fbthanks');
+    toast('✓ Feedback saved'); go('feedback');
+  }
+  function viewFbThanks() {
+    return '<div class="fbthanks"><div class="big">🏕️</div><h1>Thank you!</h1><p>We really appreciate you taking the time.<br>Enjoy the rest of your stay!</p>' +
+      '<p class="handback">Please hand the tablet back to the host.</p>' +
+      '<div class="btns" style="justify-content:center"><button class="btn sun big" id="fbAnother">🙋 Someone else wants to fill one in</button></div>' +
+      '<div class="hostback"><button class="btn ghost" id="fbHostBack">Host: hold this button to go back</button></div></div>';
+  }
+  function bindFbThanks() {
+    $('#fbAnother').onclick = function () { state.fb = blankFb('camper'); go('fbform'); };
+    var hb = $('#fbHostBack'), t = null;
+    var start = function (ev) { ev.preventDefault(); hb.classList.add('holding'); t = setTimeout(function () { go('feedback'); }, 1200); };
+    var stop = function () { hb.classList.remove('holding'); clearTimeout(t); };
+    hb.addEventListener('pointerdown', start); ['pointerup', 'pointerleave', 'pointercancel'].forEach(function (e) { hb.addEventListener(e, stop); });
+  }
+  function fbCsv() {
+    var q = function (v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    var rows = db.feedback.slice().sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0); }).map(function (f) {
+      return [f.date, f.name, f.site, f.stars || '', (f.likes || []).join('; '), (f.needs || []).join('; '), f.comment, f.followUp ? 'yes' : '', f.handled ? 'yes' : '', f.by].map(q).join(',');
+    });
+    return ['Date,Name,Site,Stars,Likes,Needs work,Comment,Wants follow-up,Handled,Written by'].concat(rows).join('\r\n');
+  }
+  function printFeedback() {
+    var ym = todayIso().slice(0, 7);
+    var list = db.feedback.filter(function (f) { return (f.date || '').slice(0, 7) === ym; }).sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+    var s = fbSummary(list);
+    var title = parseIso(todayIso()).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    var rows = list.map(function (f) {
+      return '<tr><td>' + esc(shortDate(f.date)) + '</td><td>' + esc(f.name) + '</td><td>' + esc(f.site) + '</td><td>' + starTxt(f.stars) + '</td><td>' + esc((f.likes || []).join(', ')) +
+        '</td><td>' + esc((f.needs || []).join(', ')) + '</td><td>' + esc(f.comment) + (f.followUp ? ' <b>[follow up' + (f.handled ? ' — done' : '') + ']</b>' : '') + '</td></tr>';
+    }).join('') || '<tr><td colspan="7">No feedback this month.</td></tr>';
+    var html = '<div class="ph"><h1>' + esc(db.settings.park) + ' — Camper Feedback, ' + esc(title) + '</h1><div>' + s.count + ' responses · average ' + (s.avg ? s.avg.toFixed(1) + ' stars' : '–') + '</div></div>' +
+      '<p><b>Liked most:</b> ' + (s.likes.map(function (x) { return esc(x.k) + ' (' + x.n + ')'; }).join(', ') || '–') +
+      '<br><b>Needs work:</b> ' + (s.needs.map(function (x) { return esc(x.k) + ' (' + x.n + ')'; }).join(', ') || '–') + '</p>' +
+      '<table><thead><tr><th>Date</th><th>Name</th><th>Site</th><th>Stars</th><th>Liked</th><th>Needs work</th><th>Comments</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    var ps = $('#printSheet'); if (!ps) { ps = document.createElement('div'); ps.id = 'printSheet'; document.body.appendChild(ps); }
+    ps.innerHTML = html;
+    window.print();
   }
 
   // ---------- Print ----------
@@ -607,6 +783,10 @@
       if (b.dataset.month) { var d = parseIso(state.date); d.setDate(1); d.setMonth(d.getMonth() + num(b.dataset.month)); state.date = iso(d); return render(); }
       if (b.dataset.mode) { state.totalsMode = b.dataset.mode; return render(); }
       if (b.dataset.print) return printSheet(b.dataset.print);
+      if (b.dataset.fbnew) { state.fb = blankFb(b.dataset.fbnew); return go('fbform'); }
+      if (b.dataset.fb) { var fx = db.feedback.filter(function (x) { return x.id === b.dataset.fb; })[0]; if (fx) { state.fb = JSON.parse(JSON.stringify(fx)); state.fb.likes = state.fb.likes || []; state.fb.needs = state.fb.needs || []; go('fbform'); } return; }
+      if (b.id === 'fbPrint') return printFeedback();
+      if (b.id === 'fbCsv') { download('campground-feedback-' + todayIso() + '.csv', fbCsv(), 'text/csv'); return toast('Spreadsheet saved to Downloads'); }
       if (b.id === 'savePrices') { savePriceForm(); toast('✓ Prices saved'); return render(); }
       if (b.dataset.pstep) {
         var inp = $('#p-' + b.dataset.pstep);
@@ -646,6 +826,7 @@
           data.entries.forEach(function (e) { if (e && e.id) byId[e.id] = e; });
           db.entries = Object.keys(byId).map(function (k) { return byId[k]; });
           db.days = Object.assign({}, data.days || {}, db.days);
+          if (Array.isArray(data.feedback)) { var fbId = {}; db.feedback.forEach(function (x) { fbId[x.id] = x; }); data.feedback.forEach(function (x) { if (x && x.id) fbId[x.id] = x; }); db.feedback = Object.keys(fbId).map(function (k) { return fbId[k]; }); }
           if (data.settings) { db.settings = Object.assign({}, db.settings, data.settings); db.settings.prices = Object.assign({}, DEFAULTS.settings.prices, data.settings.prices || {}); }
           lockRates(); save(); toast('✓ Backup restored'); render();
         });
