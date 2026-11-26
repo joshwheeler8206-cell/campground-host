@@ -281,7 +281,7 @@
       '<div class="card"><div class="step"><span class="num">5</span><h2>How did they pay?</h2></div><div class="choices pay" id="pays">' + payBtns + '</div>' +
         '<div id="checkNoWrap"' + (d.pay === 'check' ? '' : ' hidden') + '><label class="lbl" for="f-checkno">Check number (optional)</label><input class="txt" id="f-checkno" inputmode="numeric" value="' + esc(d.checkNo) + '"></div>' +
         '<div class="proof"><div class="lbl">Proof of payment <span style="font-weight:400;color:var(--muted)">(picks cash or check for you)</span></div>' +
-          '<div class="btns"><button type="button" class="btn" data-proof="check">📸 Check (front &amp; back)</button><button type="button" class="btn" data-proof="cash">📸 Cash</button><button type="button" class="btn" data-proof="credit">📸 Card (front &amp; back)</button></div>' +
+          '<div class="btns"><button type="button" class="btn" data-proof="check">📸 Check (front &amp; back)</button><button type="button" class="btn" data-proof="cash">📸 Cash</button><button type="button" class="btn" data-proof="credit">📸 Card receipt</button></div>' +
           '<div class="thumbs" id="payThumbs">' + thumbs(d.payPhotos) + '</div><div id="ocrNote" class="ocrnote" hidden></div></div>' +
       '</div>' +
       messCard(d) +
@@ -739,14 +739,13 @@
     toast('✓ Checked in ' + rec.name + ' — ' + money(rec.total)); go('sheet', { date: rec.date });
     return rec;
   }
-  // Proof shots for a payment. Check and card = front then back (host asked for card photos;
-  // the back-of-card hint says to cover the 3-digit code).
+  // Proof shots for a payment. Check = front then back; card = the receipt / card-reader screen
+  // (never the card itself — a card photo is everything a thief needs).
   var PROOF = {
     check: [{ side: 'front', title: 'Check — FRONT', hint: 'Lay the check flat, front side up, inside the box.', frame: 'check', stamp: 'Check front' },
             { side: 'back', title: 'Now flip it over — BACK of the check', hint: 'Back side up, so the signature / endorsement shows.', frame: 'check', stamp: 'Check back' }],
     cash: [{ side: '', title: 'Photo of the cash', hint: 'Spread the bills out on a table so each one shows.', frame: '', stamp: 'Cash' }],
-    credit: [{ side: 'front', title: 'Card — FRONT', hint: 'Lay the card flat, front side up, inside the box.', frame: 'check', stamp: 'Card front' },
-             { side: 'back', title: 'Now flip it over — BACK of the card', hint: 'Cover the 3-digit code with your thumb, then take the picture so the signature shows.', frame: 'check', stamp: 'Card back' }]
+    credit: [{ side: 'receipt', title: 'Photo of the card receipt', hint: 'Take a picture of the receipt or the card-reader screen showing it went through. Do not photograph the card itself.', frame: '', stamp: 'Card receipt' }]
   };
   function proofSequence(kind, stampTail, entryId, each) {
     var steps = PROOF[kind] || [];
@@ -762,7 +761,7 @@
     })(0);
   }
   function proofMissing(e) {
-    if (e.pay !== 'check' && e.pay !== 'credit') return '';
+    if (e.pay !== 'check') return '';
     var what = e.pay === 'check' ? ' of the check' : ' of the card';
     var sides = (e.payPhotos || []).map(function (p) { return p.side; });
     if (!sides.length) return '';
@@ -773,7 +772,7 @@
   // After a fast check-in: one more tap to photograph the cash/check (optional).
   function offerProof(rec) {
     var kind = rec.pay;
-    var what = kind === 'check' ? 'the check (front and back)' : kind === 'cash' ? 'the cash' : 'the card (front and back)';
+    var what = kind === 'check' ? 'the check (front and back)' : kind === 'cash' ? 'the cash' : 'the card receipt';
     var m = modal('<h2>✓ ' + esc(rec.name) + ' is checked in</h2><p style="font-size:1.15rem">Snap a photo of ' + what + ' for proof?</p>' +
       '<div class="btns"><button class="btn sun big" data-yes>📸 Yes, take the photo</button><button class="btn ghost big" data-no>No thanks</button></div>');
     $('[data-no]', m).onclick = closeModal;
