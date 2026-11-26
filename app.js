@@ -52,7 +52,7 @@
     if (!db.days || typeof db.days !== 'object') db.days = {};
     if (!Array.isArray(db.feedback)) db.feedback = [];
     if (DEMO && !db.seeded) seedDemo();
-    if (KIOSK && !db.settings.kioskInit) { db.settings.kioskInit = true; db.settings.mode = 'cantril'; }
+    if (KIOSK && !db.settings.kioskInit) { db.settings.kioskInit = true; db.settings.mode = 'cantril'; save(); }
     lockRates();
   }
   // Every check-in remembers the price it was charged, so changing prices later
